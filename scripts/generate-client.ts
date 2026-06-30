@@ -71,9 +71,9 @@ const apiUrl = (() => {
 
 console.log(`\nFetching entity metadata from ${apiUrl}/entities ...\n`);
 
-const data = await fetch(`${apiUrl}/entities`).then((r) => r.json());
-const entities: EntityMeta[] = Array.isArray(data) ? data : data.entities;
-const enums: EnumMeta[] = Array.isArray(data) ? [] : (data.enums ?? []);
+const data = (await fetch(`${apiUrl}/entities`).then((r) => r.json())) as unknown;
+const entities: EntityMeta[] = Array.isArray(data) ? data : (data as any).entities;
+const enums: EnumMeta[] = Array.isArray(data) ? [] : ((data as any).enums ?? []);
 
 console.log(`Found ${entities.length} entities and ${enums.length} enums\n`);
 

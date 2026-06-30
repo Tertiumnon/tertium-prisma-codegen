@@ -1,4 +1,4 @@
-import type { DMMFField, DMMFModel, FilterMode } from './dmmf.types';
+import type { DMMFField, DMMFModel, FilterMode } from '../dmmf/dmmf.types';
 
 // ── Internal model types (used by server generators) ─────────────────────────
 

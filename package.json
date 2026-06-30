@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "test": "bun test",
+    "lint:ts:check": "bunx tsc --noEmit",
     "release:patch": "npm version patch && npm publish",
     "release:minor": "npm version minor && npm publish",
     "release:major": "npm version major && npm publish"
