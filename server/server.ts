@@ -1,9 +1,7 @@
+import type { DMMFField, DMMFModel } from '../dmmf/dmmf.types';
 import type {
-  DMMFField,
-  DMMFModel,
   EntityMetadata,
   Field,
-  FilterMode,
   ForeignKeyField,
   GraphQLResolverConfig,
   LocalizationConfig,
@@ -12,25 +10,7 @@ import type {
   RestHandlerConfig,
   RestRouterConfig,
   TypesGeneratorOptions,
-} from './index';
-
-// ── Re-export config types so callers only need one import ───────────────────
-
-export type {
-  DMMFField,
-  DMMFModel,
-  EntityMetadata,
-  Field,
-  FilterMode,
-  ForeignKeyField,
-  GraphQLResolverConfig,
-  LocalizationConfig,
-  MetadataInferrerOptions,
-  Model,
-  RestHandlerConfig,
-  RestRouterConfig,
-  TypesGeneratorOptions,
-};
+} from './server.types';
 
 // ── Schema parser ─────────────────────────────────────────────────────────────
 

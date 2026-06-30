@@ -5,7 +5,7 @@ import {
   generateRestRouterContent,
   parsePrismaModels,
 } from './server';
-import type { DMMFModel } from './index';
+import type { DMMFModel } from '../dmmf/dmmf.types';
 
 // ── Shared fixtures ───────────────────────────────────────────────────────────
 

@@ -1,43 +1,13 @@
-import type { EntityMeta, EnumMeta } from './index';
-import { toKebabCase as _toKebabCase } from './server';
-
-// ── Re-export entity types so callers only need one import ───────────────────
-
-export type { EntityMeta, EnumMeta, FieldMeta } from './index';
-
-// ── Config types ──────────────────────────────────────────────────────────────
-
-export interface ClientTypesConfig {
-  entityImportBase: string;
-  enumsImport: string;
-}
-
-export interface ClientSchemaConfig {
-  tableSchemaImport: string;
-  optionsServiceImport: string;
-  optionsServiceExport?: string;
-  skipFields?: string[];
-  largeTextFields?: string[];
-}
-
-export interface GraphQLClientConfig {
-  graphqlRequestImport: string;
-  graphqlRequestExport?: string;
-  apiTypesImport: string;
-}
-
-export interface ClientBarrelConfig {
-  entityImportBase: string;
-}
-
-export interface TypesBarrelConfig {
-  entityImportBase: string;
-  enumsImport?: string;
-}
-
-export interface SchemasBarrelConfig {
-  entityImportBase: string;
-}
+import type { EntityMeta, EnumMeta } from '../dmmf/dmmf.types';
+import { toKebabCase as _toKebabCase } from '../dmmf/dmmf.utils';
+import type {
+  ClientTypesConfig,
+  ClientSchemaConfig,
+  GraphQLClientConfig,
+  ClientBarrelConfig,
+  TypesBarrelConfig,
+  SchemasBarrelConfig,
+} from './client.types';
 
 // ── Types generator ───────────────────────────────────────────────────────────
 
