@@ -8,18 +8,25 @@
     "./schema-parser": "./schema-parser.ts",
     "./metadata-inferrer": "./metadata-inferrer.ts",
     "./types-generator": "./types-generator.ts",
+    "./entity-meta": "./entity-meta.ts",
     "./graphql/metadata-generator": "./graphql/metadata-generator.ts",
     "./graphql/resolvers-generator": "./graphql/resolvers-generator.ts",
     "./rest/handler-generator": "./rest/handler-generator.ts",
-    "./rest/router-generator": "./rest/router-generator.ts"
+    "./rest/router-generator": "./rest/router-generator.ts",
+    "./client/types-generator": "./client/types-generator.ts",
+    "./client/schema-generator": "./client/schema-generator.ts",
+    "./client/graphql-client-generator": "./client/graphql-client-generator.ts",
+    "./client/barrel-generator": "./client/barrel-generator.ts"
   },
   "files": [
     "types.ts",
     "schema-parser.ts",
     "metadata-inferrer.ts",
     "types-generator.ts",
+    "entity-meta.ts",
     "graphql/",
-    "rest/"
+    "rest/",
+    "client/"
   ],
   "scripts": {
     "test": "bun test"
