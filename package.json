@@ -11,15 +11,7 @@
   "files": [
     "index.ts",
     "server.ts",
-    "client.ts",
-    "types.ts",
-    "schema-parser.ts",
-    "metadata-inferrer.ts",
-    "types-generator.ts",
-    "entity-meta.ts",
-    "graphql/",
-    "rest/",
-    "client/"
+    "client.ts"
   ],
   "scripts": {
     "test": "bun test"
