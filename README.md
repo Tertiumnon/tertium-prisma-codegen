@@ -1,8 +1,20 @@
 # @tertium/prisma-codegen
 
-A code generation library that reads your Prisma schema at runtime and writes TypeScript files. You run it as a script — it outputs `.auto.ts` files that become part of your project. Nothing runs at request time.
+Universal code generation library for Prisma schemas. Reads your Prisma schema at runtime and generates:
+- **REST API handlers** with CRUD operations
+- **GraphQL resolvers** with filtering, search, pagination
+- **TypeScript types** for all entities
+- **Client-side generators** for frontend apps
 
----
+Single source of truth: your Prisma schema. Everything else is auto-generated.
+
+## Why use this?
+
+- ✅ **Zero manual CRUD code** — all handlers generated from schema
+- ✅ **Single definition** — Prisma schema drives everything
+- ✅ **Metadata-driven** — filtering, search, relations inferred automatically
+- ✅ **Frontend/backend sync** — shared EntityMeta contract
+- ✅ **Universal** — no project-specific names or patterns hardcoded
 
 ## How it works
 
@@ -10,7 +22,7 @@ A code generation library that reads your Prisma schema at runtime and writes Ty
 Prisma schema
       │
       ▼
-  [generate-server.ts]  ──uses──▶  @tertium/prisma-codegen/server
+[generate-server.ts]  ──uses──▶  @tertium/prisma-codegen/server
       │
       ├── writes: src/entities/*.types.auto.ts
       ├── writes: src/entities/*.rest.auto.ts
@@ -19,31 +31,33 @@ Prisma schema
       └── exposes: GET /entities  (EntityMeta JSON)
                         │
                         ▼
-              [generate-client.ts]  ──uses──▶  @tertium/prisma-codegen/client
+         [generate-client.ts]  ──uses──▶  @tertium/prisma-codegen/client
                         │
                         ├── writes: src/entities/*.types.auto.ts
                         ├── writes: src/entities/*.schema.auto.ts
                         └── writes: src/entities/*.client.auto.ts
 ```
 
----
-
-## Getting started
-
-Copy the two script templates from this package into your project, then fill in the **Config section** at the top of each file.
-
-```
-node_modules/@tertium/prisma-codegen/scripts/generate-server.ts  →  scripts/generate-server.ts
-node_modules/@tertium/prisma-codegen/scripts/generate-client.ts  →  scripts/generate-client.ts
-```
-
-### Backend
+## Installation
 
 ```bash
-bun scripts/generate-server.ts
+npm install @tertium/prisma-codegen
 ```
 
-Open [scripts/generate-server.ts](./scripts/generate-server.ts) — the config block at the top looks like this:
+## Quick start
+
+### 1. Copy script templates
+
+Copy the two generation scripts into your project:
+
+```bash
+cp node_modules/@tertium/prisma-codegen/scripts/generate-server.ts scripts/generate-server.ts
+cp node_modules/@tertium/prisma-codegen/scripts/generate-client.ts scripts/generate-client.ts
+```
+
+### 2. Generate backend code
+
+Edit `scripts/generate-server.ts` and set your paths:
 
 ```ts
 const PRISMA_CLIENT_IMPORT  = './generated/prisma/client';
@@ -52,40 +66,26 @@ const GRAPHQL_CONTEXT_PATH  = './graphql.context';
 const ENTITIES_DIR          = 'src/entities';
 const REST_ROUTER_OUT       = 'src/core/rest.router.auto.ts';
 const GRAPHQL_RESOLVERS_OUT = 'src/core/graphql.resolvers.auto.ts';
+
+// Customize filtering/search behavior:
 const SEARCHABLE_PATTERNS: RegExp[] = [/name/i, /title/i];
 const ENUM_INT_PATTERNS:   RegExp[] = [];
 const SKIP_FILTERABLE:     string[] = [];
 ```
 
-### Frontend
+Then run:
 
 ```bash
-bun scripts/generate-client.ts --api http://localhost:8080
+bun scripts/generate-server.ts
 ```
 
-Open [scripts/generate-client.ts](./scripts/generate-client.ts) — the config block at the top looks like this:
+### 3. Expose `/entities` endpoint
 
-```ts
-const ENTITIES_DIR        = 'src/entities';
-const ENTITY_IMPORT_BASE  = '../../entities';
-const GRAPHQL_REQUEST_IMPORT = '../../core/graphql/graphql.client';
-const API_TYPES_IMPORT    = '../../core/graphql/graphql.types.auto';
-const TABLE_SCHEMA_IMPORT = '../../core/rest/rest.types';
-const OPTIONS_SERVICE_IMPORT = '../../core/graphql/graphql.service';
-const SKIP_FIELDS         = ['id', 'createdAt', 'updatedAt'];
-const LARGE_TEXT_FIELDS:  string[] = [];
-// ... output file paths
-```
-
----
-
-## Exposing `/entities` from the backend
-
-The frontend script fetches `EntityMeta` from a running backend endpoint. Add this to your server:
+Add this to your backend to serve entity metadata:
 
 ```ts
 import { PrismaClient } from './generated/prisma/client';
-import { dmmfToEntityMeta } from '@tertium/prisma-codegen/dmmf';
+import { dmmfToEntityMeta } from '@tertium/prisma-codegen/dmmf/dmmf.utils';
 
 const pc = new PrismaClient();
 const runtime = (pc as any)._runtimeDataModel;
@@ -97,47 +97,140 @@ const dmmfEnums = Object.entries(runtime.enums).map(([name, e]: any) =>
 
 const { entities, enums } = dmmfToEntityMeta(dmmfModels, dmmfEnums);
 
-// Return { entities, enums } from GET /entities
+// Return from GET /entities endpoint
 ```
 
----
+### 4. Generate frontend code
+
+Edit `scripts/generate-client.ts` and set your paths:
+
+```ts
+const ENTITIES_DIR        = 'src/entities';
+const ENTITY_IMPORT_BASE  = '../../entities';
+const GRAPHQL_REQUEST_IMPORT = '../../core/graphql/graphql.client';
+const API_TYPES_IMPORT    = '../../core/graphql/graphql.types.auto';
+const TABLE_SCHEMA_IMPORT = '../../core/rest/rest.types';
+const OPTIONS_SERVICE_IMPORT = '../../core/graphql/graphql.service';
+const SKIP_FIELDS         = ['id', 'createdAt', 'updatedAt'];
+```
+
+Then run:
+
+```bash
+bun scripts/generate-client.ts --api http://localhost:8080
+```
+
+## Library structure
+
+The library uses **direct imports only** — no central barrel files.
+
+```
+@tertium/prisma-codegen/
+├── dmmf/
+│   ├── dmmf.types.ts          # DMMF + EntityMeta types
+│   └── dmmf.utils.ts          # Utilities + dmmfToEntityMeta()
+├── server/
+│   ├── server.types.ts        # Config types
+│   ├── server.ts              # Generators
+│   └── server.test.ts         # Tests (36 tests)
+├── client/
+│   ├── client.types.ts        # Config types
+│   ├── client.ts              # Generators
+│   └── client.test.ts         # Tests (12 tests)
+└── scripts/
+    ├── generate-server.ts
+    └── generate-client.ts
+```
+
+## Imports
+
+Import directly from the files you need:
+
+```ts
+// Types
+import type { DMMFModel, EntityMeta, FieldMeta, EnumMeta } 
+  from '@tertium/prisma-codegen/dmmf/dmmf.types';
+
+// Utilities
+import { dmmfToEntityMeta, toCamelCase, toKebabCase } 
+  from '@tertium/prisma-codegen/dmmf/dmmf.utils';
+
+// Backend generators
+import { parsePrismaModels, inferEntityMetadata, generateEntityTypesContent } 
+  from '@tertium/prisma-codegen/server/server';
+
+// Frontend generators
+import { generateClientTypesContent, generateClientSchemaContent } 
+  from '@tertium/prisma-codegen/client/client';
+```
 
 ## API reference
 
-### `@tertium/prisma-codegen/dmmf` — types + utilities
+### `dmmf/dmmf.types.ts` — DMMF and EntityMeta types
 
-**Types:**
 | Export | Purpose |
 |---|---|
-| `DMMFModel`, `DMMFField`, `DMMFEnum`, `FilterMode` | Input types matching `PrismaClient._runtimeDataModel` |
-| `EntityMeta`, `FieldMeta`, `EnumMeta` | Shared contract between `/entities` endpoint and frontend script |
+| `DMMFModel`, `DMMFField`, `DMMFEnum` | Prisma runtime data model types |
+| `FilterMode` | `'contains' \| 'equals'` for filtering |
+| `EntityMeta`, `FieldMeta`, `EnumMeta` | Shared frontend/backend contract |
 
-**Utilities:**
+### `dmmf/dmmf.utils.ts` — Utilities
+
 | Export | Purpose |
 |---|---|
-| `dmmfToEntityMeta(models, enums)` | Converts DMMF → EntityMeta (use in `/entities` endpoint) |
-| `toCamelCase`, `toKebabCase`, `toDisplayName` | String utilities |
+| `dmmfToEntityMeta(models, enums)` | Convert DMMF to EntityMeta (for `/entities` endpoint) |
+| `toCamelCase(str)` | `PascalCase` → `camelCase` |
+| `toKebabCase(str)` | `PascalCase` → `kebab-case` |
+| `toDisplayName(str)` | `PascalCase` → `Pascal Case` |
 
-### `@tertium/prisma-codegen/server` — backend generators
+### `server/server.ts` — Backend generators
 
-| Export | Generates |
+| Export | Purpose |
 |---|---|
-| `parsePrismaModels(dmmfModels)` | `Model[]` for use with the generators below |
-| `inferEntityMetadata(dmmfModels, options)` | Filterable / searchable / relation metadata per model |
-| `generateEntityTypesContent(model)` | `*.types.auto.ts` — TypeScript interfaces |
-| `generateRestHandlerContent(name, meta, config)` | `*.rest.auto.ts` — 5 CRUD handler functions |
-| `generateRestRouterContent(models, config)` | Single router dispatching to all entity handlers |
-| `generateGraphQLResolversContent(meta, dmmfModels, config)` | All Query + Mutation resolvers |
-| `toKebabCase`, `toCamelCase`, `prismaToTsType` | String utilities |
+| `parsePrismaModels(dmmfModels)` | Parse DMMF models into internal representation |
+| `inferEntityMetadata(dmmfModels, options)` | Infer filtering/search/relation metadata |
+| `generateEntityTypesContent(model)` | Generate `*.types.auto.ts` |
+| `generateRestHandlerContent(name, meta, config)` | Generate `*.rest.auto.ts` (5 CRUD functions) |
+| `generateRestRouterContent(models, config)` | Generate REST router dispatching all entities |
+| `generateGraphQLResolversContent(meta, dmmfModels, config)` | Generate GraphQL resolvers |
 
-### `@tertium/prisma-codegen/client` — frontend generators
+### `client/client.ts` — Frontend generators
 
-| Export | Generates |
+| Export | Purpose |
 |---|---|
-| `generateClientTypesContent(entity, allEntities, enums, config)` | `*.types.auto.ts` — typed entity interface |
-| `generateClientSchemaContent(entity, config)` | `*.schema.auto.ts` — TableSchema for forms |
-| `generateGraphQLClientContent(entity, config)` | `*.client.auto.ts` — typed GraphQL CRUD functions |
-| `generateClientBarrelContent(entities, config)` | Client barrel (re-exports all CRUD functions) |
-| `generateTypesBarrelContent(entities, enums, config)` | Types barrel (utility types + all entity interfaces) |
-| `generateSchemasBarrelContent(entities, config)` | Schemas barrel (re-exports all TableSchema instances) |
-| `generateEnumsContent(enums)` | Enum declarations from Prisma enum metadata |
+| `generateClientTypesContent(entity, allEntities, enums, config)` | Generate `*.types.auto.ts` |
+| `generateClientSchemaContent(entity, config)` | Generate `*.schema.auto.ts` (TableSchema) |
+| `generateGraphQLClientContent(entity, config)` | Generate `*.client.auto.ts` (GraphQL CRUD) |
+| `generateClientBarrelContent(entities, config)` | Generate client barrel (re-exports all) |
+| `generateTypesBarrelContent(entities, enums, config)` | Generate types barrel |
+| `generateSchemasBarrelContent(entities, config)` | Generate schemas barrel |
+| `generateEnumsContent(enums)` | Generate enum declarations |
+
+## Testing
+
+Run all 48 tests:
+
+```bash
+bun test
+```
+
+- **server.test.ts** — 36 tests for backend generators
+- **client.test.ts** — 12 tests for frontend generators
+
+All tests use generic fixtures (no project-specific names).
+
+## Release
+
+Release scripts use semantic versioning:
+
+```bash
+npm run release:patch   # 0.1.0 → 0.1.1
+npm run release:minor   # 0.1.0 → 0.2.0
+npm run release:major   # 0.1.0 → 1.0.0
+```
+
+Each bumps version and publishes to npm.
+
+## License
+
+ISC
