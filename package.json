@@ -18,9 +18,9 @@
   "scripts": {
     "test": "bun test",
     "lint:ts:check": "bunx tsc --noEmit",
-    "release:patch": "npm version patch && npm publish",
-    "release:minor": "npm version minor && npm publish",
-    "release:major": "npm version major && npm publish"
+    "release:patch": "node node_modules/@tertium/js/scripts/release.js patch",
+    "release:minor": "node node_modules/@tertium/js/scripts/release.js minor",
+    "release:major": "node node_modules/@tertium/js/scripts/release.js major"
   },
   "author": "Vitalii Balabanov",
   "license": "ISC",
