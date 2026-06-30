@@ -4,21 +4,14 @@
   "description": "Universal Prisma schema code generation — REST handlers, GraphQL resolvers, TypeScript types.",
   "type": "module",
   "exports": {
-    "./types": "./types.ts",
-    "./schema-parser": "./schema-parser.ts",
-    "./metadata-inferrer": "./metadata-inferrer.ts",
-    "./types-generator": "./types-generator.ts",
-    "./entity-meta": "./entity-meta.ts",
-    "./graphql/metadata-generator": "./graphql/metadata-generator.ts",
-    "./graphql/resolvers-generator": "./graphql/resolvers-generator.ts",
-    "./rest/handler-generator": "./rest/handler-generator.ts",
-    "./rest/router-generator": "./rest/router-generator.ts",
-    "./client/types-generator": "./client/types-generator.ts",
-    "./client/schema-generator": "./client/schema-generator.ts",
-    "./client/graphql-client-generator": "./client/graphql-client-generator.ts",
-    "./client/barrel-generator": "./client/barrel-generator.ts"
+    ".": "./index.ts",
+    "./server": "./server.ts",
+    "./client": "./client.ts"
   },
   "files": [
+    "index.ts",
+    "server.ts",
+    "client.ts",
     "types.ts",
     "schema-parser.ts",
     "metadata-inferrer.ts",

@@ -1,44 +1,87 @@
 # @tertium/prisma-codegen
 
-Generates TypeScript types, GraphQL resolvers, and REST API handlers from Prisma's runtime data model. Everything is pure string output — no I/O, no framework dependencies, no opinions about how you run your server.
+Generates TypeScript types, GraphQL resolvers, REST API handlers, and frontend client code from Prisma's runtime data model. Pure string output — no I/O, no framework dependencies.
 
-## Modules
+## Three imports
 
-Each module is imported directly — there is no barrel export.
-
-| Import path | Exports |
-|---|---|
-| `@tertium/prisma-codegen/types` | All shared TypeScript types |
-| `@tertium/prisma-codegen/schema-parser` | DMMF mapping and string utilities |
-| `@tertium/prisma-codegen/metadata-inferrer` | Auto-infer entity metadata from DMMF models |
-| `@tertium/prisma-codegen/types-generator` | Generate `*.types.auto.ts` files |
-| `@tertium/prisma-codegen/graphql/metadata-generator` | Generate GraphQL context and metadata files |
-| `@tertium/prisma-codegen/graphql/resolvers-generator` | Generate GraphQL resolver file |
-| `@tertium/prisma-codegen/rest/handler-generator` | Generate per-entity REST handler files |
-| `@tertium/prisma-codegen/rest/router-generator` | Generate main REST router file |
+```ts
+import type { DMMFModel, EntityMeta }   from '@tertium/prisma-codegen';        // shared types
+import { inferEntityMetadata, ... }     from '@tertium/prisma-codegen/server';  // backend generators
+import { generateClientTypesContent, ... } from '@tertium/prisma-codegen/client'; // frontend generators
+```
 
 ---
 
-## Quick start
+## Getting DMMF models
 
-The library works from Prisma's runtime data model — no schema file parsing, no regex. Instantiate `PrismaClient` to get the structured model data, then pass it to the generators.
+All generators take Prisma's runtime data model as input. No DB connection is opened — `_runtimeDataModel` is populated from the generated client bundle at construction time.
+
+```ts
+import { PrismaClient } from './generated/prisma/client';
+import type { DMMFModel } from '@tertium/prisma-codegen';
+
+function getDMMFModels(): DMMFModel[] {
+  const pc = new PrismaClient();
+  const runtime = (pc as any)._runtimeDataModel;
+  return Object.entries(runtime.models as Record<string, { fields: any[]; dbName?: string | null }>)
+    .map(([name, m]) => ({ name, dbName: m.dbName, fields: m.fields }));
+}
+```
+
+---
+
+## `@tertium/prisma-codegen` — shared types
+
+```ts
+import type { DMMFModel, DMMFField, DMMFEnum } from '@tertium/prisma-codegen';
+import type { EntityMeta, FieldMeta, EnumMeta } from '@tertium/prisma-codegen';
+import { dmmfToEntityMeta } from '@tertium/prisma-codegen';
+```
+
+### `dmmfToEntityMeta(dmmfModels, dmmfEnums)`
+
+Converts Prisma's runtime model data into `EntityMeta[]` and `EnumMeta[]`. Used by the backend `/entities` endpoint to serve metadata to the frontend generator.
+
+```ts
+const { entities, enums } = dmmfToEntityMeta(dmmfModels, dmmfEnums);
+```
+
+`EntityMeta` fields: `name`, `camel`, `kebab`, `displayName`, `fields: FieldMeta[]`
+
+`FieldMeta` fields: `name`, `prismaType`, `tsType`, `formType`, `required`, `isPrimary`, `isRelation`, `isArray`, `relationModel`
+
+---
+
+## `@tertium/prisma-codegen/server` — backend generators
+
+```ts
+import {
+  // Schema parsing
+  parsePrismaModels, parseForeignKeys, toKebabCase, toCamelCase, prismaToTsType,
+  // Metadata
+  inferEntityMetadata,
+  // Generators
+  generateEntityTypesContent,
+  generateGraphQLMetadataFileContent, generateGraphQLContextTypesContent,
+  generateGraphQLResolversContent,
+  generateRestHandlerContent, generateRestRouterContent,
+} from '@tertium/prisma-codegen/server';
+```
+
+### Typical backend generation script
 
 ```ts
 import { writeFileSync } from 'fs';
 import { PrismaClient } from './generated/prisma/client';
-import { parsePrismaModels, toKebabCase } from '@tertium/prisma-codegen/schema-parser';
-import { inferEntityMetadata } from '@tertium/prisma-codegen/metadata-inferrer';
-import { generateEntityTypesContent } from '@tertium/prisma-codegen/types-generator';
-import { generateRestHandlerContent } from '@tertium/prisma-codegen/rest/handler-generator';
-import { generateRestRouterContent } from '@tertium/prisma-codegen/rest/router-generator';
-import { generateGraphQLResolversContent } from '@tertium/prisma-codegen/graphql/resolvers-generator';
-import type { DMMFModel } from '@tertium/prisma-codegen/types';
-
-function getDMMFModels(): DMMFModel[] {
-  const pc = new PrismaClient();
-  const runtimeModels = (pc as any)._runtimeDataModel.models as Record<string, { fields: any[]; dbName?: string | null }>;
-  return Object.entries(runtimeModels).map(([name, m]) => ({ name, dbName: m.dbName, fields: m.fields }));
-}
+import type { DMMFModel } from '@tertium/prisma-codegen';
+import {
+  parsePrismaModels, toKebabCase,
+  inferEntityMetadata,
+  generateEntityTypesContent,
+  generateRestHandlerContent,
+  generateRestRouterContent,
+  generateGraphQLResolversContent,
+} from '@tertium/prisma-codegen/server';
 
 const dmmfModels = getDMMFModels();
 const models = parsePrismaModels(dmmfModels);
@@ -62,391 +105,173 @@ writeFileSync('src/resolvers.auto.ts', generateGraphQLResolversContent(metadata,
 }));
 ```
 
-> **No DB connection is opened.** `_runtimeDataModel` is populated from the generated client bundle at construction time.
+### `inferEntityMetadata(dmmfModels, options?)`
 
----
-
-## types
-
-Shared types used across the library.
-
-```ts
-import type { DMMFModel, DMMFField, Model, Field, EntityMetadata, ... } from '@tertium/prisma-codegen/types';
-```
-
-### DMMF input types
-
-These are compatible with Prisma's `_runtimeDataModel.models` structure:
-
-```ts
-type DMMFField = {
-  name: string;
-  kind: 'scalar' | 'object' | 'enum' | 'unsupported';
-  type: string;               // 'String', 'Int', 'Author', …
-  isRequired: boolean;
-  isList: boolean;
-  isId: boolean;
-  relationName?: string;
-  relationFromFields?: readonly string[];
-  relationToFields?: readonly string[];
-};
-
-type DMMFModel = {
-  name: string;
-  dbName?: string | null;
-  fields: readonly DMMFField[];
-};
-```
-
----
-
-## schema-parser
-
-Maps Prisma's runtime model data to the library's own `Model` / `Field` types, and exposes string utilities.
-
-```ts
-import {
-  parsePrismaModels,
-  parseForeignKeys,
-  toKebabCase,
-  toCamelCase,
-  prismaToTsType,
-} from '@tertium/prisma-codegen/schema-parser';
-```
-
-### `parsePrismaModels(dmmfModels)`
-
-Returns `Model[]` — one entry per model, with scalar and relation fields mapped.
-
-```ts
-type Model = {
-  name: string;
-  dbName?: string;
-  fields: Field[];
-};
-
-type Field = {
-  name: string;
-  type: string;       // Prisma scalar type or related model name
-  required: boolean;
-  isId: boolean;
-  isRelation: boolean; // true when kind === 'object'
-  isArray: boolean;
-};
-```
-
-### `parseForeignKeys(dmmfModel)`
-
-Returns `ForeignKeyField[]` — owning-side relation fields with their FK scalar name. Used by the resolver generator to produce Prisma `connect` transforms.
-
-```ts
-type ForeignKeyField = {
-  fieldName: string;    // 'authorId'
-  relationName: string; // 'Author'
-  isRequired: boolean;
-};
-```
-
-### Utilities
-
-| Function | Example |
-|---|---|
-| `toKebabCase('UserProfile')` | `'user-profile'` |
-| `toCamelCase('UserProfile')` | `'userProfile'` |
-| `prismaToTsType('DateTime')` | `'Date'` |
-
----
-
-## metadata-inferrer
-
-Derives `EntityMetadata` for all models using field-name and field-type heuristics. The metadata controls what filtering, search, relations, and ordering the generators emit.
-
-```ts
-import { inferEntityMetadata } from '@tertium/prisma-codegen/metadata-inferrer';
-
-const metadata = inferEntityMetadata(dmmfModels, options?);
-```
-
-### Heuristics
-
-| Field kind / pattern | Inferred as |
-|---|---|
-| `scalar` `String` (non-ID) | `filterable: 'contains'` |
-| Matches a `searchableFieldPatterns` pattern | also added to `searchableFields` |
-| `scalar` field name ends with `Id` | `filterable: 'equals'` |
-| `scalar` `Boolean` | `filterable: 'equals'` |
-| `scalar` `Int` matching an `enumLikeIntPatterns` pattern | `filterable: 'equals'` |
-| `object` kind (relation) | added to `includeRelations` |
-| `orderBy` | prefers `name`, then `title`, then `createdAt` |
-
-### Options
-
-There are no default patterns — the caller defines all project-specific heuristics:
+Derives filterable fields, searchable fields, relations, and default sort from field names and types. No defaults — the caller defines all project-specific patterns.
 
 ```ts
 type MetadataInferrerOptions = {
-  skipFilterableFields?: string[];    // exclude specific field names from filterable inference
-  searchableFieldPatterns?: RegExp[]; // field names matching these become searchableFields
-  enumLikeIntPatterns?: RegExp[];     // Int field names matching these get filterable 'equals'
+  skipFilterableFields?: string[];    // exclude specific fields from filterable inference
+  searchableFieldPatterns?: RegExp[]; // field names matching these become full-text searchable
+  enumLikeIntPatterns?: RegExp[];     // Int fields matching these get filterable 'equals'
 };
 ```
 
-### Output
+### `generateGraphQLResolversContent(metadata, dmmfModels, config)`
 
-```ts
-type EntityMetadata = {
-  filterable?: Record<string, 'contains' | 'equals'>;
-  searchableFields?: string[];
-  includeRelations?: string[];
-  orderBy?: string;
-};
-```
-
----
-
-## types-generator
-
-Generates a `{entity}.types.auto.ts` file with a read model interface and a create/update input interface.
-
-```ts
-import { generateEntityTypesContent } from '@tertium/prisma-codegen/types-generator';
-
-writeFileSync(path, generateEntityTypesContent(model, options?));
-```
-
-```ts
-type TypesGeneratorOptions = {
-  skipInputFields?: string[]; // default: ['id', 'createdAt', 'updatedAt']
-};
-```
-
-**Output example** for an `Author` model:
-
-```ts
-export interface Author {
-  id: string;
-  name: string;
-  bio?: string;
-  categoryId?: string;
-}
-
-export interface AuthorInput {
-  name: string;
-  bio?: string;
-  categoryId?: string;
-}
-```
-
----
-
-## graphql/metadata-generator
-
-Generates two supporting files for GraphQL.
-
-```ts
-import {
-  generateGraphQLMetadataFileContent,
-  generateGraphQLContextTypesContent,
-} from '@tertium/prisma-codegen/graphql/metadata-generator';
-```
-
-### `generateGraphQLMetadataFileContent(metadata)`
-
-Outputs a `*.constants.auto.ts` file that re-exports the inferred metadata as a typed constant — useful for runtime resolver configuration.
-
-### `generateGraphQLContextTypesContent(extraFields?)`
-
-Outputs a `*.types.auto.ts` file with a base `GraphQLResolverContext` interface:
-
-```ts
-export interface GraphQLResolverContext {
-  userId?: string;
-  isAdmin?: boolean;
-  userRoles?: string[];
-}
-```
-
-Pass `extraFields` as `Record<string, string>` to inject additional typed properties:
-
-```ts
-generateGraphQLContextTypesContent({ tenant: 'string' });
-// → tenant?: string;
-```
-
----
-
-## graphql/resolvers-generator
-
-Generates a single file with Query and Mutation resolvers for every model in `metadata`.
-
-```ts
-import { generateGraphQLResolversContent } from '@tertium/prisma-codegen/graphql/resolvers-generator';
-
-writeFileSync(path, generateGraphQLResolversContent(metadata, dmmfModels, config));
-```
-
-`dmmfModels` is used to derive FK-to-relation transforms. Each model gets:
-
-- `{model}` — find by ID (UUID validated)
-- `{model}List` — paginated list with dynamic filtering and full-text search
-- `create{Model}` — create with FK → `connect` transform
-- `update{Model}` — update with FK → `connect` transform
-- `delete{Model}` — delete by ID
-
-### Config
+Each model gets: `{model}` (by ID), `{model}List` (paginated + filtered), `create{Model}`, `update{Model}`, `delete{Model}`.
 
 ```ts
 type GraphQLResolverConfig = {
-  prismaClientPath: string;    // import path for PrismaClient
-  prismaClientExport?: string; // default: 'PrismaClient'
-  contextTypePath: string;     // import path for base context interface
-  contextTypeExport?: string;  // default: 'GraphQLResolverContext'
+  prismaClientPath: string;
+  prismaClientExport?: string;  // default: 'PrismaClient'
+  contextTypePath: string;
+  contextTypeExport?: string;   // default: 'GraphQLResolverContext'
   localization?: LocalizationConfig;
 };
 ```
 
-### Localization
+### `generateRestHandlerContent(modelName, metadata, config)`
 
-Optional. When provided, each resolver accepts a `lang?: string` argument and passes each entity through the consumer-supplied function.
-
-```ts
-type LocalizationConfig = {
-  localizeImport: string;  // path to a module exporting the localize function
-  localizeExport?: string; // default: 'localizeEntity'
-};
-```
-
-The generated code calls:
-
-```ts
-await localizeEntity(entity, 'ModelName', lang)
-```
-
-Required signature in your module:
-
-```ts
-async function localizeEntity(entity: any, modelName: string, lang: string): Promise<any>
-```
-
-All localization logic (which fields to translate, fallback language, translation lookup) lives entirely in your function.
-
----
-
-## rest/handler-generator
-
-Generates a `{entity}.rest.auto.ts` file with five CRUD handler functions.
-
-```ts
-import { generateRestHandlerContent } from '@tertium/prisma-codegen/rest/handler-generator';
-
-writeFileSync(path, generateRestHandlerContent(modelName, metadata, config));
-```
-
-Generated function signatures:
-
-```ts
-list{Model}s(req: Request, lang?: string): Promise<Response>
-get{Model}(id: string, lang?: string): Promise<Response>
-create{Model}(req: Request): Promise<Response>
-update{Model}(id: string, req: Request): Promise<Response>
-delete{Model}(id: string): Promise<Response>
-```
-
-`lang` is an explicit parameter — the handler does not extract it from the request. Language detection belongs in the router (see [rest/router-generator](#restrouter-generator)).
-
-All handlers validate UUID format and return `Content-Type: application/json` responses. List endpoints support `?limit`, `?offset`, `?search`, and `?filter.{field}` query params derived from metadata.
-
-### Config
+Five CRUD handler functions per entity. List endpoints support `?limit`, `?offset`, `?search`, `?filter.{field}`.
 
 ```ts
 type RestHandlerConfig = {
-  prismaClientPath: string;       // import path for the Prisma client singleton
+  prismaClientPath: string;
   localization?: LocalizationConfig;
 };
 ```
 
-### Localization
+### `generateRestRouterContent(models, config)`
 
-Optional. When provided, list and get handlers receive `lang?` and pass each entity through your function:
-
-```ts
-type LocalizationConfig = {
-  localizeImport: string;  // path to a module exporting the localize function
-  localizeExport?: string; // default: 'localizeEntity'
-};
-```
-
-The generated code calls:
-
-```ts
-// in list:
-const localizedData = lang
-  ? await Promise.all(data.map(item => localizeEntity(item, 'ModelName', lang)))
-  : data;
-
-// in get:
-if (data && lang) return localizeEntity(data, 'ModelName', lang);
-```
-
----
-
-## rest/router-generator
-
-Generates a single `router.auto.ts` file that exports `handleRestRequest(req)`. It dispatches to entity handlers based on `/api/{entity}/{id?}`.
-
-```ts
-import { generateRestRouterContent } from '@tertium/prisma-codegen/rest/router-generator';
-
-writeFileSync(path, generateRestRouterContent(models, config));
-```
-
-### Config
+Single router file dispatching to entity handlers based on `/api/{entity}/{id?}`.
 
 ```ts
 type RestRouterConfig = {
-  entityImportBase: string;  // relative path from the router file to the entities directory
-  extraImports?: string;     // raw import statements injected at the top
-  extraRoutes?: string;      // raw route-matching code inserted before entity dispatch
-  extraHelpers?: string;     // raw helper functions appended at the bottom
+  entityImportBase: string;
+  extraImports?: string;   // injected at top
+  extraRoutes?: string;    // matched before entity dispatch
+  extraHelpers?: string;   // appended at bottom
   localization?: {
-    getLangImport: string;   // path to a module exporting the lang-extraction function
-    getLangExport?: string;  // default: 'getLanguageFromRequest'
+    getLangImport: string;
+    getLangExport?: string; // default: 'getLanguageFromRequest'
   };
 };
 ```
 
 ### Localization
 
-When `localization` is set, the router extracts the language **once per request** before dispatching, then passes it as `lang` to all list and get handlers:
+Optional for both GraphQL and REST. When provided, list/get handlers receive `lang?` and pass entities through your function:
 
 ```ts
-const lang = getLanguageFromRequest(req);
-// …
-if (entity === 'authors') {
-  if (method === 'GET' && !id) return await authorRest.listAuthors(req, lang);
-  if (method === 'GET' && id)  return await authorRest.getAuthor(id, lang);
-  // create / update / delete do not receive lang
+type LocalizationConfig = {
+  localizeImport: string;
+  localizeExport?: string; // default: 'localizeEntity'
+};
+
+// Required function signature in your module:
+async function localizeEntity(entity: any, modelName: string, lang: string): Promise<any>
+```
+
+---
+
+## `@tertium/prisma-codegen/client` — frontend generators
+
+Used by a frontend script that fetches `EntityMeta[]` from the backend `/entities` endpoint and generates client code.
+
+```ts
+import {
+  generateClientTypesContent,   // {entity}.types.auto.ts
+  generateClientSchemaContent,  // {entity}.schema.auto.ts
+  generateGraphQLClientContent, // {entity}.client.auto.ts
+  generateClientBarrelContent,  // api-graphql.client.auto.ts
+  generateTypesBarrelContent,   // api-graphql.types.auto.ts
+  generateSchemasBarrelContent, // api-rest.schemas.auto.ts
+  generateEnumsContent,         // api-graphql.enums.auto.ts
+} from '@tertium/prisma-codegen/client';
+```
+
+### Typical frontend generation script
+
+```ts
+import type { EntityMeta, EnumMeta } from '@tertium/prisma-codegen';
+import {
+  generateClientTypesContent, generateClientSchemaContent, generateGraphQLClientContent,
+  generateClientBarrelContent, generateTypesBarrelContent, generateSchemasBarrelContent, generateEnumsContent,
+} from '@tertium/prisma-codegen/client';
+
+const { entities, enums } = await fetch(`${API_URL}/entities`).then(r => r.json());
+
+for (const entity of entities) {
+  write(`src/entities/${entity.kebab}/${entity.kebab}.types.auto.ts`,
+    generateClientTypesContent(entity, entities, enums, {
+      entityImportBase: '../../entities',
+      enumsImport: '../../core/api-graphql/api-graphql.enums.auto',
+    }));
+
+  write(`src/entities/${entity.kebab}/${entity.kebab}.schema.auto.ts`,
+    generateClientSchemaContent(entity, {
+      tableSchemaImport: '../../core/api-rest/api-rest.types',
+      optionsServiceImport: '../../core/api-graphql/api-graphql.service',
+      skipFields: ['id', 'createdAt', 'updatedAt'],
+      largeTextFields: ['summary', 'details'],
+    }));
+
+  write(`src/entities/${entity.kebab}/${entity.kebab}.client.auto.ts`,
+    generateGraphQLClientContent(entity, {
+      graphqlRequestImport: '../../core/api-graphql/api-graphql.client',
+      apiTypesImport: '../../core/api-graphql/api-graphql.types.auto',
+    }));
 }
+
+write('src/core/api-graphql/api-graphql.client.auto.ts',
+  generateClientBarrelContent(entities, { entityImportBase: '../../entities' }));
+
+write('src/core/api-graphql/api-graphql.types.auto.ts',
+  generateTypesBarrelContent(entities, enums, {
+    entityImportBase: '../../entities',
+    enumsImport: './api-graphql.enums.auto',
+  }));
+
+write('src/core/api-rest/api-rest.schemas.auto.ts',
+  generateSchemasBarrelContent(entities, { entityImportBase: '../../entities' }));
+
+write('src/core/api-graphql/api-graphql.enums.auto.ts',
+  generateEnumsContent(enums));
 ```
 
-Required signature in your module:
+### Config types
 
 ```ts
-function getLanguageFromRequest(req: Request): string
+type ClientTypesConfig = {
+  entityImportBase: string; // path from the entity file to the entities root
+  enumsImport: string;      // path to the enums barrel
+};
+
+type ClientSchemaConfig = {
+  tableSchemaImport: string;         // path to TableSchema type
+  optionsServiceImport: string;      // path to options loader service
+  optionsServiceExport?: string;     // default: 'fetchAllEntityOptions'
+  skipFields?: string[];             // fields excluded from form (e.g. ['id', 'createdAt'])
+  largeTextFields?: string[];        // fields rendered as textarea (e.g. ['summary', 'details'])
+};
+
+type GraphQLClientConfig = {
+  graphqlRequestImport: string;
+  graphqlRequestExport?: string;     // default: 'graphqlRequest'
+  apiTypesImport: string;
+};
 ```
 
-### Adding custom routes
-
-Use `extraImports`, `extraRoutes`, and `extraHelpers` to inject project-specific routes without modifying the generator:
+### `generateTypesBarrelContent` output includes
 
 ```ts
-generateRestRouterContent(models, {
-  entityImportBase: '../entities',
-  extraImports: `import { handleAuth } from './auth.handler';`,
-  extraRoutes: `
-  const authMatch = pathname.match(/^\\/api\\/auth\\/(.+)$/);
-  if (authMatch) return handleAuth(method, authMatch[1], req);`,
-});
+export interface ApiList<T> { data: T[]; total: number; }
+export interface PaginationInput { limit?: number; offset?: number; }
+export interface SortInput { field: string; direction: 'ASC' | 'DESC'; }
+export interface EntityOption { value: string; label: string; }
+export interface EntityOptionsPage { options: EntityOption[]; total: number; hasMore: boolean; }
+export interface EntityItem { id: string; title?: string; name?: string; }
+// + all entity type re-exports
+// + enum re-exports (when enumsImport is provided)
 ```
-
-`extraRoutes` is matched **before** the entity dispatch block, so custom routes take priority.
