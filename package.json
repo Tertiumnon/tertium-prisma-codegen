@@ -24,6 +24,9 @@
   },
   "author": "Vitalii Balabanov",
   "license": "ISC",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@tertium/js": "^1.4.8",
     "@types/bun": "^1.3.9",
