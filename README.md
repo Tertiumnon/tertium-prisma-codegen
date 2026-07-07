@@ -148,6 +148,17 @@ The library uses **direct imports only** — no central barrel files.
     └── generate-client.ts
 ```
 
+## Import Rule
+
+**Always use explicit subpath imports.** No default export.
+
+- `@tertium/prisma-codegen/dmmf` → types
+- `@tertium/prisma-codegen/dmmf/dmmf.utils` → utilities  
+- `@tertium/prisma-codegen/server` → backend generators
+- `@tertium/prisma-codegen/client` → frontend generators
+
+This makes imports clear and prevents ambiguity.
+
 ## Imports
 
 Use package subpath exports — one import per module:

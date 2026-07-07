@@ -4,12 +4,12 @@
   "description": "Universal Prisma schema code generation — REST handlers, GraphQL resolvers, TypeScript types.",
   "type": "module",
   "exports": {
+    "./dmmf/types": "./dmmf/dmmf.types.ts",
+    "./dmmf/utils": "./dmmf/dmmf.utils.ts",
     "./server": "./server/server.ts",
-    "./server/server.types": "./server/server.types.ts",
+    "./server/types": "./server/server.types.ts",
     "./client": "./client/client.ts",
-    "./client/client.types": "./client/client.types.ts",
-    "./dmmf": "./dmmf/dmmf.types.ts",
-    "./dmmf/dmmf.utils": "./dmmf/dmmf.utils.ts"
+    "./client/types": "./client/client.types.ts"
   },
   "files": [
     "dmmf/",
