@@ -5,8 +5,11 @@
   "type": "module",
   "exports": {
     "./server": "./server/server.ts",
+    "./server/server.types": "./server/server.types.ts",
     "./client": "./client/client.ts",
-    "./dmmf": "./dmmf/dmmf.types.ts"
+    "./client/client.types": "./client/client.types.ts",
+    "./dmmf": "./dmmf/dmmf.types.ts",
+    "./dmmf/dmmf.utils": "./dmmf/dmmf.utils.ts"
   },
   "files": [
     "dmmf/",

@@ -16,6 +16,12 @@ Single source of truth: your Prisma schema. Everything else is auto-generated.
 - ✅ **Frontend/backend sync** — shared EntityMeta contract
 - ✅ **Universal** — no project-specific names or patterns hardcoded
 
+## What is DMMF?
+
+DMMF (Data Model Meta Format) is Prisma's internal runtime representation of your schema. It is available at runtime without a database connection via `PrismaClient._runtimeDataModel` and contains every model, field, relation, and enum from your `schema.prisma`.
+
+This library reads DMMF instead of parsing `.prisma` files directly — which means it works with the already-compiled Prisma client and never touches the schema file at runtime.
+
 ## How it works
 
 ```
@@ -144,67 +150,113 @@ The library uses **direct imports only** — no central barrel files.
 
 ## Imports
 
-Import directly from the files you need:
+Use package subpath exports — one import per module:
 
 ```ts
-// Types
-import type { DMMFModel, EntityMeta, FieldMeta, EnumMeta } 
-  from '@tertium/prisma-codegen/dmmf/dmmf.types';
+// DMMF + EntityMeta types
+import type { DMMFModel, DMMFField, DMMFEnum, EntityMeta, FieldMeta, EnumMeta, FilterMode }
+  from '@tertium/prisma-codegen/dmmf';
 
-// Utilities
-import { dmmfToEntityMeta, toCamelCase, toKebabCase } 
+// DMMF utilities
+import { dmmfToEntityMeta, toCamelCase, toKebabCase, toDisplayName }
   from '@tertium/prisma-codegen/dmmf/dmmf.utils';
 
 // Backend generators
-import { parsePrismaModels, inferEntityMetadata, generateEntityTypesContent } 
-  from '@tertium/prisma-codegen/server/server';
+import { parsePrismaModels, inferEntityMetadata, generateEntityTypesContent,
+         generateRestHandlerContent, generateRestRouterContent,
+         generateGraphQLResolversContent, generateGraphQLMetadataFileContent,
+         generateGraphQLContextTypesContent }
+  from '@tertium/prisma-codegen/server';
+
+// Backend config types
+import type { GraphQLResolverConfig, RestHandlerConfig, RestRouterConfig,
+              MetadataInferrerOptions, LocalizationConfig }
+  from '@tertium/prisma-codegen/server/server.types';
 
 // Frontend generators
-import { generateClientTypesContent, generateClientSchemaContent } 
-  from '@tertium/prisma-codegen/client/client';
+import { generateClientTypesContent, generateClientSchemaContent,
+         generateGraphQLClientContent, generateClientBarrelContent,
+         generateTypesBarrelContent, generateSchemasBarrelContent,
+         generateEnumsContent }
+  from '@tertium/prisma-codegen/client';
+
+// Frontend config types
+import type { ClientTypesConfig, ClientSchemaConfig, GraphQLClientConfig,
+              ClientBarrelConfig, TypesBarrelConfig, SchemasBarrelConfig }
+  from '@tertium/prisma-codegen/client/client.types';
 ```
 
 ## API reference
 
-### `dmmf/dmmf.types.ts` — DMMF and EntityMeta types
+### `@tertium/prisma-codegen/dmmf` — DMMF and EntityMeta types
 
 | Export | Purpose |
 |---|---|
-| `DMMFModel`, `DMMFField`, `DMMFEnum` | Prisma runtime data model types |
-| `FilterMode` | `'contains' \| 'equals'` for filtering |
-| `EntityMeta`, `FieldMeta`, `EnumMeta` | Shared frontend/backend contract |
+| `DMMFModel`, `DMMFField`, `DMMFEnum` | Prisma runtime data model input types |
+| `FilterMode` | `'contains' \| 'equals'` |
+| `EntityMeta`, `FieldMeta`, `EnumMeta` | Shared frontend/backend contract (served by `/entities`) |
 
-### `dmmf/dmmf.utils.ts` — Utilities
+### `@tertium/prisma-codegen/dmmf/dmmf.utils` — Utilities
 
 | Export | Purpose |
 |---|---|
-| `dmmfToEntityMeta(models, enums)` | Convert DMMF to EntityMeta (for `/entities` endpoint) |
+| `dmmfToEntityMeta(models, enums)` | Convert DMMF to `{ entities, enums }` (for `/entities` endpoint) |
 | `toCamelCase(str)` | `PascalCase` → `camelCase` |
 | `toKebabCase(str)` | `PascalCase` → `kebab-case` |
 | `toDisplayName(str)` | `PascalCase` → `Pascal Case` |
+| `scalarTsType(prismaType, required)` | Map Prisma scalar type to TypeScript type string |
+| `scalarFormType(prismaType, fieldName)` | Map Prisma scalar type to form field type string |
+| `mapField(field, fkRelationMap)` | Convert a `DMMFField` to `FieldMeta` |
+| `buildFkRelationMap(model)` | Build foreign-key → relation-model map for a model |
 
-### `server/server.ts` — Backend generators
+### `@tertium/prisma-codegen/server` — Backend generators
 
 | Export | Purpose |
 |---|---|
-| `parsePrismaModels(dmmfModels)` | Parse DMMF models into internal representation |
-| `inferEntityMetadata(dmmfModels, options)` | Infer filtering/search/relation metadata |
-| `generateEntityTypesContent(model)` | Generate `*.types.auto.ts` |
-| `generateRestHandlerContent(name, meta, config)` | Generate `*.rest.auto.ts` (5 CRUD functions) |
+| `parsePrismaModels(dmmfModels)` | Parse DMMF models into internal `Model[]` |
+| `parseForeignKeys(dmmfModel)` | Extract foreign key fields from a model |
+| `inferEntityMetadata(dmmfModels, options)` | Infer filterable/searchable/relation metadata |
+| `generateEntityTypesContent(model, options?)` | Generate `*.types.auto.ts` |
+| `generateRestHandlerContent(name, meta, config)` | Generate `*.rest.auto.ts` (5 CRUD handlers) |
 | `generateRestRouterContent(models, config)` | Generate REST router dispatching all entities |
 | `generateGraphQLResolversContent(meta, dmmfModels, config)` | Generate GraphQL resolvers |
+| `generateGraphQLMetadataFileContent(metadata)` | Generate `GRAPHQL_ENTITY_METADATA` constants file |
+| `generateGraphQLContextTypesContent(extraFields?)` | Generate GraphQL context type interface |
 
-### `client/client.ts` — Frontend generators
+### `@tertium/prisma-codegen/server/server.types` — Backend config types
+
+| Export | Purpose |
+|---|---|
+| `MetadataInferrerOptions` | Options for `inferEntityMetadata()` |
+| `LocalizationConfig` | Localization import/export paths |
+| `GraphQLResolverConfig` | Config for `generateGraphQLResolversContent()` |
+| `RestHandlerConfig` | Config for `generateRestHandlerContent()` |
+| `RestRouterConfig` | Config for `generateRestRouterContent()` |
+| `EntityMetadata` | Internal metadata shape (filterable, searchable, relations) |
+| `Field`, `Model`, `ForeignKeyField` | Internal parsed model types |
+
+### `@tertium/prisma-codegen/client` — Frontend generators
 
 | Export | Purpose |
 |---|---|
 | `generateClientTypesContent(entity, allEntities, enums, config)` | Generate `*.types.auto.ts` |
 | `generateClientSchemaContent(entity, config)` | Generate `*.schema.auto.ts` (TableSchema) |
 | `generateGraphQLClientContent(entity, config)` | Generate `*.client.auto.ts` (GraphQL CRUD) |
-| `generateClientBarrelContent(entities, config)` | Generate client barrel (re-exports all) |
+| `generateClientBarrelContent(entities, config)` | Generate client barrel |
 | `generateTypesBarrelContent(entities, enums, config)` | Generate types barrel |
 | `generateSchemasBarrelContent(entities, config)` | Generate schemas barrel |
 | `generateEnumsContent(enums)` | Generate enum declarations |
+
+### `@tertium/prisma-codegen/client/client.types` — Frontend config types
+
+| Export | Purpose |
+|---|---|
+| `ClientTypesConfig` | Config for `generateClientTypesContent()` |
+| `ClientSchemaConfig` | Config for `generateClientSchemaContent()` |
+| `GraphQLClientConfig` | Config for `generateGraphQLClientContent()` |
+| `ClientBarrelConfig` | Config for `generateClientBarrelContent()` |
+| `TypesBarrelConfig` | Config for `generateTypesBarrelContent()` |
+| `SchemasBarrelConfig` | Config for `generateSchemasBarrelContent()` |
 
 ## Testing
 
