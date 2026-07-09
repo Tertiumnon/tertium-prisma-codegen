@@ -36,6 +36,11 @@ export type MetadataInferrerOptions = {
   skipFilterableFields?: string[];
   searchableFieldPatterns?: RegExp[];
   enumLikeIntPatterns?: RegExp[];
+  /**
+   * Ordered list of field names to try when deciding a model's default `orderBy`.
+   * The first field name that exists on the model wins. If none match, falls back to the primary key.
+   */
+  orderByFieldPreference?: string[];
 };
 
 export type TypesGeneratorOptions = {

@@ -78,7 +78,12 @@ export function inferEntityMetadata(
   dmmfModels: readonly DMMFModel[],
   options: MetadataInferrerOptions = {},
 ): Record<string, EntityMetadata> {
-  const { skipFilterableFields = [], searchableFieldPatterns = [], enumLikeIntPatterns = [] } = options;
+  const {
+    skipFilterableFields = [],
+    searchableFieldPatterns = [],
+    enumLikeIntPatterns = [],
+    orderByFieldPreference = [],
+  } = options;
   const skipSet = new Set(skipFilterableFields);
   const metadata: Record<string, EntityMetadata> = {};
 
@@ -89,7 +94,6 @@ export function inferEntityMetadata(
 
     for (const field of model.fields) {
       if (field.kind === 'object') {
-        if (!field.isList && field.relationFromFields?.length) continue;
         includeRelations.push(field.name);
         continue;
       }
@@ -108,10 +112,12 @@ export function inferEntityMetadata(
       }
     }
 
-    const fieldNames = model.fields.map((f) => f.name);
-    let orderBy = 'createdAt';
-    if (fieldNames.includes('name')) orderBy = 'name';
-    else if (fieldNames.includes('title')) orderBy = 'title';
+    const fieldNameSet = new Set(model.fields.map((f) => f.name));
+    const primaryKey = model.fields.find((f) => f.isId)?.name;
+    if (!primaryKey) {
+      throw new Error(`inferEntityMetadata: model "${model.name}" has no @id field`);
+    }
+    const orderBy = orderByFieldPreference.find((n) => fieldNameSet.has(n)) ?? primaryKey;
 
     if (Object.keys(filterable).length > 0 || searchableFields.length > 0 || includeRelations.length > 0) {
       metadata[model.name] = {
@@ -394,7 +400,10 @@ function _buildListResolver(modelName: string, metadata: EntityMetadata, localiz
   const camelCase = toCamelCase(modelName);
   const filterLogic = _buildFilterLogicGQL(metadata);
   const includeLogic = _buildInclude(metadata);
-  const orderBy = metadata.orderBy || 'createdAt';
+  const orderBy = metadata.orderBy;
+  if (!orderBy) {
+    throw new Error(`Missing orderBy in metadata for "${modelName}"`);
+  }
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
   const args = localization
     ? `{ filter, pagination, lang }: { filter?: any; pagination?: any; lang?: string }`
@@ -520,7 +529,10 @@ export function generateRestHandlerContent(
 ): string {
   const camelCase = toCamelCase(modelName);
   const filterLogic = _buildFilterLogicREST(metadata);
-  const orderBy = metadata.orderBy || 'createdAt';
+  const orderBy = metadata.orderBy;
+  if (!orderBy) {
+    throw new Error(`Missing orderBy in metadata for "${modelName}"`);
+  }
   const { localization } = config;
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
 

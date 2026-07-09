@@ -96,10 +96,18 @@ export function generateClientSchemaContent(entity: EntityMeta, config: ClientSc
     optionsServiceExport = 'fetchAllEntityOptions',
     skipFields = [],
     largeTextFields = [],
+    sortFieldPreference = [],
   } = config;
 
   const skipSet = new Set(skipFields);
   const largeTextSet = new Set(largeTextFields);
+
+  const primaryKey = entity.fields.find((f) => f.isPrimary)?.name;
+  if (!primaryKey) {
+    throw new Error(`generateClientSchemaContent: entity "${entity.name}" has no field marked as primary key`);
+  }
+  const fieldNameSet = new Set(entity.fields.map((f) => f.name));
+  const sortField = sortFieldPreference.find((n) => fieldNameSet.has(n)) ?? primaryKey;
 
   const formFields = entity.fields.filter((f) => !f.isRelation && !skipSet.has(f.name));
   const regularFields = formFields.filter((f) => !largeTextSet.has(f.name));
@@ -141,8 +149,8 @@ import type { TableSchema } from '${tableSchemaImport}';
 export const ${entity.camel}Schema: TableSchema = {
   name: '${entity.kebab}',
   displayName: '${entity.displayName}',
-  primaryKey: 'id',
-  sortField: 'name',
+  primaryKey: '${primaryKey}',
+  sortField: '${sortField}',
   fields: [
 ${allDefs},
   ],
@@ -152,13 +160,25 @@ ${allDefs},
 
 // ── GraphQL client generator ──────────────────────────────────────────────────
 
-export function generateGraphQLClientContent(entity: EntityMeta, config: GraphQLClientConfig): string {
+export function generateGraphQLClientContent(
+  entity: EntityMeta,
+  allEntities: EntityMeta[],
+  config: GraphQLClientConfig,
+): string {
   const { graphqlRequestImport, graphqlRequestExport = 'graphqlRequest', apiTypesImport } = config;
+
+  const entityByName = new Map(allEntities.map((e) => [e.name, e]));
 
   const allFields = entity.fields
     .map((f) => {
-      if (f.isRelation) return `        ${f.name} {\n          id\n          title\n        }`;
-      return `        ${f.name}`;
+      if (!f.isRelation) return `        ${f.name}`;
+
+      const related = entityByName.get(f.tsType);
+      const scalarFieldNames = related
+        ? related.fields.filter((rf) => !rf.isRelation).map((rf) => rf.name)
+        : ['id'];
+      const selection = scalarFieldNames.map((n) => `          ${n}`).join('\n');
+      return `        ${f.name} {\n${selection}\n        }`;
     })
     .join('\n');
 

@@ -160,6 +160,7 @@ describe('generateClientSchemaContent', () => {
   it('generates TableSchema with fields', () => {
     const output = generateClientSchemaContent(userEntity, {
       tableSchemaImport: '../../types',
+      optionsServiceImport: '../../options',
       skipFields: ['id'],
     });
 
@@ -168,14 +169,94 @@ describe('generateClientSchemaContent', () => {
     expect(output).toContain("name");
   });
 
-  it('generates schema with primaryKey and sortField', () => {
-    const output = generateClientSchemaContent(userEntity, {
+  it('derives primaryKey from the field marked isPrimary (not hardcoded to "id")', () => {
+    const entityWithCustomPk: EntityMeta = {
+      name: 'Country',
+      camel: 'country',
+      kebab: 'country',
+      displayName: 'Country',
+      fields: [
+        {
+          name: 'code',
+          prismaType: 'String',
+          tsType: 'string',
+          formType: 'text',
+          required: true,
+          isPrimary: true,
+          isRelation: false,
+          isArray: false,
+          relationModel: null,
+        },
+        {
+          name: 'displayName',
+          prismaType: 'String',
+          tsType: 'string',
+          formType: 'text',
+          required: true,
+          isPrimary: false,
+          isRelation: false,
+          isArray: false,
+          relationModel: null,
+        },
+      ],
+    };
+
+    const output = generateClientSchemaContent(entityWithCustomPk, {
       tableSchemaImport: '../../types',
-      skipFields: [],
+      optionsServiceImport: '../../options',
     });
 
-    expect(output).toContain("primaryKey: 'id'");
-    expect(output).toContain("sortField:");
+    expect(output).toContain("primaryKey: 'code'");
+  });
+
+  it('picks sortField from sortFieldPreference when a listed name exists on the entity', () => {
+    const output = generateClientSchemaContent(userEntity, {
+      tableSchemaImport: '../../types',
+      optionsServiceImport: '../../options',
+      sortFieldPreference: ['label', 'email', 'name'],
+    });
+
+    // userEntity has no "label" but has "email" — expect "email".
+    expect(output).toContain("sortField: 'email'");
+  });
+
+  it('falls back to primaryKey for sortField when no preferred field exists', () => {
+    const output = generateClientSchemaContent(userEntity, {
+      tableSchemaImport: '../../types',
+      optionsServiceImport: '../../options',
+      sortFieldPreference: ['nonexistentA', 'nonexistentB'],
+    });
+
+    expect(output).toContain("sortField: 'id'");
+  });
+
+  it('throws when the entity has no primary key', () => {
+    const entityWithoutPk: EntityMeta = {
+      name: 'Broken',
+      camel: 'broken',
+      kebab: 'broken',
+      displayName: 'Broken',
+      fields: [
+        {
+          name: 'value',
+          prismaType: 'String',
+          tsType: 'string',
+          formType: 'text',
+          required: true,
+          isPrimary: false,
+          isRelation: false,
+          isArray: false,
+          relationModel: null,
+        },
+      ],
+    };
+
+    expect(() =>
+      generateClientSchemaContent(entityWithoutPk, {
+        tableSchemaImport: '../../types',
+        optionsServiceImport: '../../options',
+      }),
+    ).toThrow(/primary key/);
   });
 });
 
@@ -183,7 +264,7 @@ describe('generateClientSchemaContent', () => {
 
 describe('generateGraphQLClientContent', () => {
   it('generates GraphQL CRUD functions with fetch prefix', () => {
-    const output = generateGraphQLClientContent(userEntity, {
+    const output = generateGraphQLClientContent(userEntity, [userEntity], {
       graphqlRequestImport: '../../graphql',
       apiTypesImport: '../../types',
     });
@@ -196,7 +277,7 @@ describe('generateGraphQLClientContent', () => {
   });
 
   it('generates GraphQL queries and mutations', () => {
-    const output = generateGraphQLClientContent(userEntity, {
+    const output = generateGraphQLClientContent(userEntity, [userEntity], {
       graphqlRequestImport: '../../graphql',
       apiTypesImport: '../../types',
     });
@@ -205,6 +286,62 @@ describe('generateGraphQLClientContent', () => {
     expect(output).toContain('mutation CreateUser');
     expect(output).toContain('mutation UpdateUser');
     expect(output).toContain('mutation DeleteUser');
+  });
+
+  it('selects all scalar fields of the related entity for relation fields', () => {
+    const postWithAuthor: EntityMeta = {
+      ...postEntity,
+      fields: [
+        ...postEntity.fields,
+        {
+          name: 'Author',
+          prismaType: 'User',
+          tsType: 'User',
+          formType: 'relation',
+          required: false,
+          isPrimary: false,
+          isRelation: true,
+          isArray: false,
+          relationModel: 'User',
+        },
+      ],
+    };
+
+    const output = generateGraphQLClientContent(postWithAuthor, [userEntity, postWithAuthor], {
+      graphqlRequestImport: '../../graphql',
+      apiTypesImport: '../../types',
+    });
+
+    // userEntity has scalar fields: id, email, name (no title).
+    // Assert the exact selection block — proves fields come from metadata, not a hardcoded list.
+    expect(output).toContain('Author {\n          id\n          email\n          name\n        }');
+  });
+
+  it('falls back to id when the related entity is not in allEntities', () => {
+    const orphanRelation: EntityMeta = {
+      ...postEntity,
+      fields: [
+        ...postEntity.fields,
+        {
+          name: 'External',
+          prismaType: 'Unknown',
+          tsType: 'Unknown',
+          formType: 'relation',
+          required: false,
+          isPrimary: false,
+          isRelation: true,
+          isArray: false,
+          relationModel: 'Unknown',
+        },
+      ],
+    };
+
+    const output = generateGraphQLClientContent(orphanRelation, [orphanRelation], {
+      graphqlRequestImport: '../../graphql',
+      apiTypesImport: '../../types',
+    });
+
+    expect(output).toContain('External {\n          id\n        }');
   });
 });
 

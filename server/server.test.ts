@@ -4,6 +4,7 @@ import {
   generateRestHandlerContent,
   generateRestRouterContent,
   parsePrismaModels,
+  inferEntityMetadata,
 } from './server';
 import type { DMMFModel } from '../dmmf/dmmf.types';
 
@@ -60,12 +61,62 @@ const graphqlMetadata = {
     filterable: { name: 'contains' as const, categoryId: 'equals' as const },
     searchableFields: ['name'],
     includeRelations: ['Category'],
+    orderBy: 'name',
   },
   Category: {
     filterable: { name: 'contains' as const },
     searchableFields: ['name'],
+    orderBy: 'name',
   },
 };
+
+// ── inferEntityMetadata ──────────────────────────────────────────────────────
+
+describe('inferEntityMetadata', () => {
+  it('picks orderBy from orderByFieldPreference when a listed name exists on the model', () => {
+    // Author has fields: id, name, bio, categoryId. Prefer "title" (missing) → "name" (present).
+    const metadata = inferEntityMetadata(dmmfModels, {
+      orderByFieldPreference: ['title', 'name', 'createdAt'],
+    });
+    expect(metadata.Author.orderBy).toBe('name');
+  });
+
+  it('falls back to the primary key when no preferred field exists on the model', () => {
+    const metadata = inferEntityMetadata(dmmfModels, {
+      orderByFieldPreference: ['nonexistentA', 'nonexistentB'],
+    });
+    expect(metadata.Author.orderBy).toBe('id');
+  });
+
+  it('falls back to the primary key when no preference list is supplied', () => {
+    const metadata = inferEntityMetadata(dmmfModels);
+    expect(metadata.Author.orderBy).toBe('id');
+  });
+
+  it('derives PK from the field with isId (not hardcoded to "id")', () => {
+    const modelWithCustomPk: DMMFModel = {
+      name: 'Country',
+      dbName: null,
+      fields: [
+        { name: 'code', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true },
+        { name: 'label', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      ],
+    };
+    const metadata = inferEntityMetadata([modelWithCustomPk]);
+    expect(metadata.Country.orderBy).toBe('code');
+  });
+
+  it('throws when a model has no @id field', () => {
+    const brokenModel: DMMFModel = {
+      name: 'Broken',
+      dbName: null,
+      fields: [
+        { name: 'value', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      ],
+    };
+    expect(() => inferEntityMetadata([brokenModel])).toThrow(/@id/);
+  });
+});
 
 // ── generateGraphQLResolversContent ──────────────────────────────────────────
 
@@ -176,7 +227,7 @@ describe('generateGraphQLResolversContent', () => {
 // ── generateRestHandlerContent ────────────────────────────────────────────────
 
 const REST_PRISMA_PATH = '../../db/prisma.client';
-const handlerMetadata = { filterable: { name: 'contains' as const }, searchableFields: ['name', 'title'] };
+const handlerMetadata = { filterable: { name: 'contains' as const }, searchableFields: ['name', 'title'], orderBy: 'name' };
 
 describe('generateRestHandlerContent', () => {
   describe('without localization', () => {
@@ -227,7 +278,7 @@ describe('generateRestHandlerContent', () => {
   });
 
   describe('custom localizeExport name', () => {
-    const output = generateRestHandlerContent('Post', {}, {
+    const output = generateRestHandlerContent('Post', { orderBy: 'id' }, {
       prismaClientPath: REST_PRISMA_PATH,
       localization: { localizeImport: './my-localize', localizeExport: 'myLocalizer' },
     });
@@ -243,7 +294,7 @@ describe('generateRestHandlerContent', () => {
 
   describe('modelName propagation', () => {
     it('embeds the correct model name in localize calls', () => {
-      const output = generateRestHandlerContent('UserProfile', {}, {
+      const output = generateRestHandlerContent('UserProfile', { orderBy: 'id' }, {
         prismaClientPath: REST_PRISMA_PATH,
         localization: { localizeImport: './localize' },
       });

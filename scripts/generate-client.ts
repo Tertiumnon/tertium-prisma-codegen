@@ -46,11 +46,14 @@ const SKIP_FIELDS = ['id', 'createdAt', 'updatedAt'];
 /** Fields rendered as textarea in forms */
 const LARGE_TEXT_FIELDS: string[] = [];
 
+/** Ordered field-name preferences for each TableSchema's default `sortField`. First present name wins; falls back to the primary key. */
+const SORT_FIELD_PREFERENCE: string[] = ['name', 'title', 'createdAt'];
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import type { EntityMeta, EnumMeta } from '@tertium/prisma-codegen/dmmf';
+import type { EntityMeta, EnumMeta } from '@tertium/prisma-codegen/dmmf/types';
 import {
   generateClientTypesContent,
   generateClientSchemaContent,
@@ -108,10 +111,11 @@ for (const entity of entities) {
       optionsServiceImport: OPTIONS_SERVICE_IMPORT,
       skipFields: SKIP_FIELDS,
       largeTextFields: LARGE_TEXT_FIELDS,
+      sortFieldPreference: SORT_FIELD_PREFERENCE,
     }));
 
   write(join(dir, `${entity.kebab}.client.auto.ts`),
-    generateGraphQLClientContent(entity, {
+    generateGraphQLClientContent(entity, entities, {
       graphqlRequestImport: GRAPHQL_REQUEST_IMPORT,
       apiTypesImport: API_TYPES_IMPORT,
     }));

@@ -34,11 +34,14 @@ const ENUM_INT_PATTERNS: RegExp[] = [];
 /** Field names excluded from filterable inference */
 const SKIP_FILTERABLE: string[] = [];
 
+/** Ordered field-name preferences for each model's default `orderBy`. First present name wins; falls back to the primary key. */
+const ORDER_BY_PREFERENCE: string[] = ['name', 'title', 'createdAt'];
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import type { DMMFModel } from '@tertium/prisma-codegen/dmmf';
+import type { DMMFModel } from '@tertium/prisma-codegen/dmmf/types';
 import {
   parsePrismaModels,
   toKebabCase,
@@ -63,6 +66,7 @@ const metadata = inferEntityMetadata(dmmfModels, {
   searchableFieldPatterns: SEARCHABLE_PATTERNS,
   enumLikeIntPatterns: ENUM_INT_PATTERNS,
   skipFilterableFields: SKIP_FILTERABLE,
+  orderByFieldPreference: ORDER_BY_PREFERENCE,
 });
 
 console.log(`\n🔄 Generating server code for ${models.length} models...\n`);
