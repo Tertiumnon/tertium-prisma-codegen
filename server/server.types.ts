@@ -45,6 +45,11 @@ export type MetadataInferrerOptions = {
 
 export type TypesGeneratorOptions = {
   skipInputFields?: string[];
+  /**
+   * Computes the import path for a related entity's type, relative to the file being generated.
+   * Defaults to `../{kebab-case}/{kebab-case}.types.auto`.
+   */
+  relationImportPath?: (relatedModelName: string) => string;
 };
 
 export type LocalizationConfig = {

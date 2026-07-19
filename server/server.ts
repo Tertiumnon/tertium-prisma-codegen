@@ -138,6 +138,7 @@ const DEFAULT_SKIP_INPUT_FIELDS = new Set(['id', 'createdAt', 'updatedAt']);
 
 export function generateEntityTypesContent(model: Model, options: TypesGeneratorOptions = {}): string {
   const skipInputFields = options.skipInputFields ? new Set(options.skipInputFields) : DEFAULT_SKIP_INPUT_FIELDS;
+  const relationImportPath = options.relationImportPath ?? ((name: string) => `../${toKebabCase(name)}/${toKebabCase(name)}.types.auto`);
   const scalarFields = model.fields.filter((f) => !f.isRelation);
   const relationFields = model.fields.filter((f) => f.isRelation);
 
@@ -153,11 +154,14 @@ export function generateEntityTypesContent(model: Model, options: TypesGenerator
     .map((f) => `  ${f.name}${f.required ? '' : '?'}: ${prismaToTsType(f.type)};`)
     .join('\n');
 
+  const relatedTypeNames = Array.from(new Set(relationFields.map((f) => f.type))).filter((name) => name !== model.name);
+  const imports = relatedTypeNames.map((name) => `import type { ${name} } from '${relationImportPath(name)}';`).join('\n');
+
   return `/**
  * ${model.name} Types
  * Auto-generated from Prisma schema - DO NOT EDIT
  */
-
+${imports ? '\n' + imports + '\n' : ''}
 export interface ${model.name} {
 ${mainFields}
 }
