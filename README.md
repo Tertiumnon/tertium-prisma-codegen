@@ -1,5 +1,7 @@
 # @tertium/prisma-codegen
 
+> ⚠️ **In development.** This package is pre-1.0 and not a final/stable API — breaking changes may land in minor/patch releases without notice. Pin an exact version and review changes before upgrading.
+
 Universal code generation library for Prisma schemas. Reads your Prisma schema at runtime and generates:
 - **REST API handlers** with CRUD operations
 - **GraphQL resolvers** with filtering, search, pagination

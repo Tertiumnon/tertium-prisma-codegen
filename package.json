@@ -1,7 +1,7 @@
 {
   "name": "@tertium/prisma-codegen",
   "version": "0.1.3",
-  "description": "Universal Prisma schema code generation — REST handlers, GraphQL resolvers, TypeScript types.",
+  "description": "[IN DEVELOPMENT, not a final API] Universal Prisma schema code generation — REST handlers, GraphQL resolvers, TypeScript types.",
   "type": "module",
   "exports": {
     "./dmmf/types": "./dmmf/dmmf.types.ts",
