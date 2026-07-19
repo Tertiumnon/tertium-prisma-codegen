@@ -26,9 +26,10 @@ export function generateClientTypesContent(
   const enumsToImport = new Set<string>();
 
   for (const f of entity.fields) {
-    if (!f.isRelation || !f.tsType || f.tsType === entity.name) continue;
-    if (entityNames.has(f.tsType)) entitiesToImport.add(f.tsType);
-    else if (enumNames.has(f.tsType)) enumsToImport.add(f.tsType);
+    if (!f.tsType || f.tsType === entity.name) continue;
+    const baseType = f.tsType.endsWith(' | null') ? f.tsType.slice(0, -' | null'.length) : f.tsType;
+    if (f.isRelation && entityNames.has(baseType)) entitiesToImport.add(baseType);
+    else if (enumNames.has(baseType)) enumsToImport.add(baseType);
   }
 
   const entityImports = Array.from(entitiesToImport)

@@ -151,6 +151,34 @@ describe('generateClientTypesContent', () => {
     });
 
     expect(output).toContain('status: Status;');
+    expect(output).toContain("import { Status } from '../../enums';");
+  });
+
+  it('imports enums when entity uses an optional enum field', () => {
+    const entityWithOptionalEnum: EntityMeta = {
+      ...postEntity,
+      fields: [
+        ...postEntity.fields,
+        {
+          name: 'status',
+          prismaType: 'Status',
+          tsType: 'Status | null',
+          formType: 'text',
+          required: false,
+          isPrimary: false,
+          isRelation: false,
+          isArray: false,
+          relationModel: null,
+        },
+      ],
+    };
+
+    const output = generateClientTypesContent(entityWithOptionalEnum, [userEntity, postEntity], [statusEnum], {
+      entityImportBase: '../../entities',
+      enumsImport: '../../enums',
+    });
+
+    expect(output).toContain("import { Status } from '../../enums';");
   });
 });
 
