@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
   generateGraphQLResolversContent,
+  generateGraphQLSchemaContent,
   generateRestHandlerContent,
   generateRestRouterContent,
   parsePrismaModels,
@@ -221,6 +222,67 @@ describe('generateGraphQLResolversContent', () => {
       expect(output).toContain('import type { MyBaseContext }');
       expect(output).toContain('extends MyBaseContext');
     });
+  });
+});
+
+// ── generateGraphQLSchemaContent ────────────────────────────────────────────────
+
+describe('generateGraphQLSchemaContent', () => {
+  const models = parsePrismaModels(dmmfModels);
+  const output = generateGraphQLSchemaContent(models, graphqlMetadata);
+
+  it('declares the JSON and DateTime scalars', () => {
+    expect(output).toContain('scalar JSON');
+    expect(output).toContain('scalar DateTime');
+  });
+
+  it('generates an object type per model with correct nullability', () => {
+    expect(output).toContain('type Author {');
+    expect(output).toContain('id: String!');
+    expect(output).toContain('name: String!');
+    expect(output).toContain('bio: String');
+    expect(output).not.toContain('bio: String!');
+  });
+
+  it('types a to-many relation as a non-null list and a to-one relation as nullable', () => {
+    expect(output).toContain('Author: [Author!]!');
+    expect(output).toContain('Category: Category');
+    expect(output).not.toContain('Category: Category!');
+  });
+
+  it('generates a {Model}List type with data and total', () => {
+    expect(output).toContain('type AuthorList {\n  data: [Author!]!\n  total: Int!\n}');
+  });
+
+  it('generates separate Create and Update input types, excluding relation fields', () => {
+    expect(output).toContain('input CreateAuthor');
+    expect(output).toContain('input UpdateAuthor');
+    expect(output).not.toMatch(/input CreateAuthorInput \{[^}]*Category/);
+  });
+
+  it('generates Query fields for get and list per model', () => {
+    expect(output).toContain('author(id: String!): Author');
+    expect(output).toContain('authorList(filter: JSON, pagination: PaginationInput): AuthorList!');
+  });
+
+  it('generates Mutation fields for create, update, and delete per model', () => {
+    expect(output).toContain('createAuthor(input: CreateAuthorInput!): Author!');
+    expect(output).toContain('updateAuthor(id: String!, input: UpdateAuthorInput!): Author!');
+    expect(output).toContain('deleteAuthor(id: String!): Boolean!');
+  });
+
+  it('omits Query/Mutation/List/Input for models absent from metadata, but keeps their object type', () => {
+    const orphanModel: DMMFModel = {
+      name: 'Orphan',
+      dbName: null,
+      fields: [{ name: 'id', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true }],
+    };
+    const withOrphan = generateGraphQLSchemaContent([...models, ...parsePrismaModels([orphanModel])], graphqlMetadata);
+
+    expect(withOrphan).toContain('type Orphan {');
+    expect(withOrphan).not.toContain('orphan(id: String!)');
+    expect(withOrphan).not.toContain('type OrphanList');
+    expect(withOrphan).not.toContain('input CreateOrphanInput');
   });
 });
 

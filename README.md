@@ -119,7 +119,7 @@ Add this to your backend to serve entity metadata:
 
 ```ts
 import { PrismaClient } from './generated/prisma/client';
-import { dmmfToEntityMeta } from '@tertium/prisma-codegen/dmmf/dmmf.utils';
+import { dmmfToEntityMeta } from '@tertium/prisma-codegen/dmmf/utils';
 
 const pc = new PrismaClient();
 const runtime = (pc as any)._runtimeDataModel;
@@ -208,8 +208,8 @@ The library uses **direct imports only** — no central barrel files.
 
 **Always use explicit subpath imports.** No default export.
 
-- `@tertium/prisma-codegen/dmmf` → types
-- `@tertium/prisma-codegen/dmmf/dmmf.utils` → utilities  
+- `@tertium/prisma-codegen/dmmf/types` → types
+- `@tertium/prisma-codegen/dmmf/utils` → utilities  
 - `@tertium/prisma-codegen/server` → backend generators
 - `@tertium/prisma-codegen/client` → frontend generators
 
@@ -222,11 +222,11 @@ Use package subpath exports — one import per module:
 ```ts
 // DMMF + EntityMeta types
 import type { DMMFModel, DMMFField, DMMFEnum, EntityMeta, FieldMeta, EnumMeta, FilterMode }
-  from '@tertium/prisma-codegen/dmmf';
+  from '@tertium/prisma-codegen/dmmf/types';
 
 // DMMF utilities
 import { dmmfToEntityMeta, toCamelCase, toKebabCase, toDisplayName }
-  from '@tertium/prisma-codegen/dmmf/dmmf.utils';
+  from '@tertium/prisma-codegen/dmmf/utils';
 
 // Backend generators
 import { parsePrismaModels, inferEntityMetadata, generateEntityTypesContent,
@@ -255,7 +255,7 @@ import type { ClientTypesConfig, ClientSchemaConfig, GraphQLClientConfig,
 
 ## API reference
 
-### `@tertium/prisma-codegen/dmmf` — DMMF and EntityMeta types
+### `@tertium/prisma-codegen/dmmf/types` — DMMF and EntityMeta types
 
 | Export | Purpose |
 |---|---|
@@ -263,7 +263,7 @@ import type { ClientTypesConfig, ClientSchemaConfig, GraphQLClientConfig,
 | `FilterMode` | `'contains' \| 'equals'` |
 | `EntityMeta`, `FieldMeta`, `EnumMeta` | Shared frontend/backend contract (served by `/entities`) |
 
-### `@tertium/prisma-codegen/dmmf/dmmf.utils` — Utilities
+### `@tertium/prisma-codegen/dmmf/utils` — Utilities
 
 | Export | Purpose |
 |---|---|

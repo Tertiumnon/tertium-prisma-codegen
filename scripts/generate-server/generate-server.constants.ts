@@ -5,6 +5,7 @@ export const DEFAULT_CONFIG = {
   entitiesDir: 'src/entities',
   restRouterOut: 'src/core/rest.router.auto.ts',
   graphqlResolversOut: 'src/core/graphql.resolvers.auto.ts',
+  graphqlSchemaOut: 'src/core/graphql.schema.auto.ts',
   searchablePatterns: ['name', 'title'],
   enumIntPatterns: [],
   skipFilterable: [],
@@ -19,6 +20,7 @@ Options (all optional with sensible defaults):
   --entities-dir                 Where to write entity files
   --rest-router-out              Output path for REST router
   --graphql-resolvers-out        Output path for GraphQL resolvers
+  --graphql-schema-out           Output path for GraphQL schema (SDL, exported as typeDefs)
   --searchable-patterns          Comma-separated regex patterns for searchable fields
   --enum-int-patterns            Comma-separated regex patterns for enum-like int fields
   --skip-filterable              Comma-separated field names to exclude from filterable

@@ -11,6 +11,7 @@ import {
   generateRestHandlerContent,
   generateRestRouterContent,
   generateGraphQLResolversContent,
+  generateGraphQLSchemaContent,
 } from '../../server/server';
 import { DEFAULT_CONFIG } from './generate-server.constants';
 import type { ServerGeneratorConfig } from './generate-server.types';
@@ -41,6 +42,7 @@ const config: ServerGeneratorConfig = {
   entitiesDir: getArg('entities-dir', DEFAULT_CONFIG.entitiesDir),
   restRouterOut: getArg('rest-router-out', DEFAULT_CONFIG.restRouterOut),
   graphqlResolversOut: getArg('graphql-resolvers-out', DEFAULT_CONFIG.graphqlResolversOut),
+  graphqlSchemaOut: getArg('graphql-schema-out', DEFAULT_CONFIG.graphqlSchemaOut),
   searchablePatterns: getArgList('searchable-patterns', DEFAULT_CONFIG.searchablePatterns).map((p) => new RegExp(p, 'i')),
   enumIntPatterns: getArgList('enum-int-patterns', DEFAULT_CONFIG.enumIntPatterns).map((p) => new RegExp(p, 'i')),
   skipFilterable: getArgList('skip-filterable', DEFAULT_CONFIG.skipFilterable),
@@ -118,5 +120,9 @@ writeFileSync(
   }),
 );
 console.log(`  ✓ ${config.graphqlResolversOut}`);
+
+mkdirSync(config.graphqlSchemaOut.replace(/\/[^/]+$/, ''), { recursive: true });
+writeFileSync(config.graphqlSchemaOut, generateGraphQLSchemaContent(models, metadata));
+console.log(`  ✓ ${config.graphqlSchemaOut}`);
 
 console.log(`\n✅ Done — ${models.length} entities generated.\n`);

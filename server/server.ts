@@ -524,6 +524,119 @@ function _buildDeleteResolver(modelName: string): string {
     },`;
 }
 
+// ── GraphQL schema (SDL) generator ────────────────────────────────────────────
+
+const PRISMA_TO_GRAPHQL: Record<string, string> = {
+  String: 'String',
+  Int: 'Int',
+  Float: 'Float',
+  Boolean: 'Boolean',
+  DateTime: 'DateTime',
+  BigInt: 'Int',
+  Decimal: 'Float',
+  Json: 'JSON',
+  Bytes: 'String',
+};
+
+function _gqlFieldType(f: Field): string {
+  if (f.isRelation) {
+    // Eagerly `include`d by every generated resolver, so arrays are always
+    // present (empty at worst); singular relations can be genuinely absent.
+    return f.isArray ? `[${f.type}!]!` : f.type;
+  }
+  const scalar = PRISMA_TO_GRAPHQL[f.type] ?? 'String';
+  return f.required ? `${scalar}!` : scalar;
+}
+
+function _buildObjectType(model: Model): string {
+  const fields = model.fields.map((f) => `  ${f.name}: ${_gqlFieldType(f)}`).join('\n');
+  return `type ${model.name} {\n${fields}\n}`;
+}
+
+function _buildListType(model: Model): string {
+  return `type ${model.name}List {\n  data: [${model.name}!]!\n  total: Int!\n}`;
+}
+
+// Both Create and Update inputs stay fully optional: Prisma itself enforces
+// required-field/DB constraints on write, so the schema doesn't need to
+// duplicate that, and Update needs partial-field semantics anyway.
+function _buildInputType(model: Model, prefix: 'Create' | 'Update', skipInputFields: Set<string>): string {
+  const fields = model.fields
+    .filter((f) => !f.isRelation && !skipInputFields.has(f.name))
+    .map((f) => `  ${f.name}: ${PRISMA_TO_GRAPHQL[f.type] ?? 'String'}`)
+    .join('\n');
+  return `input ${prefix}${model.name}Input {\n${fields}\n}`;
+}
+
+function _buildQueryFields(modelNames: string[]): string {
+  return modelNames
+    .map((name) => {
+      const camel = toCamelCase(name);
+      return `  ${camel}(id: String!): ${name}\n  ${camel}List(filter: JSON, pagination: PaginationInput): ${name}List!`;
+    })
+    .join('\n');
+}
+
+function _buildMutationFields(modelNames: string[]): string {
+  return modelNames
+    .map(
+      (name) =>
+        `  create${name}(input: Create${name}Input!): ${name}!\n  update${name}(id: String!, input: Update${name}Input!): ${name}!\n  delete${name}(id: String!): Boolean!`,
+    )
+    .join('\n');
+}
+
+export function generateGraphQLSchemaContent(
+  models: Model[],
+  metadata: Record<string, EntityMetadata>,
+  options: { skipInputFields?: string[] } = {},
+): string {
+  const skipInputFields = options.skipInputFields ? new Set(options.skipInputFields) : DEFAULT_SKIP_INPUT_FIELDS;
+  // Only entities present in `metadata` get resolvers generated (see
+  // inferEntityMetadata), so only those get Query/Mutation/List/Input types.
+  const operableModels = models.filter((m) => metadata[m.name]);
+  const operableNames = operableModels.map((m) => m.name);
+
+  const objectTypes = models.map(_buildObjectType).join('\n\n');
+  const listTypes = operableModels.map(_buildListType).join('\n\n');
+  const createInputs = operableModels.map((m) => _buildInputType(m, 'Create', skipInputFields)).join('\n\n');
+  const updateInputs = operableModels.map((m) => _buildInputType(m, 'Update', skipInputFields)).join('\n\n');
+
+  const sdl = `scalar JSON
+scalar DateTime
+
+input PaginationInput {
+  limit: Int
+  offset: Int
+}
+
+${objectTypes}
+
+${listTypes}
+
+${createInputs}
+
+${updateInputs}
+
+type Query {
+${_buildQueryFields(operableNames)}
+}
+
+type Mutation {
+${_buildMutationFields(operableNames)}
+}`;
+
+  return `/**
+ * GraphQL Schema - Auto-generated
+ * DO NOT EDIT - regenerate with your codegen script
+ */
+
+export const typeDefs = \`
+${sdl}
+\`;
+`;
+}
+
 // ── REST handler generator ────────────────────────────────────────────────────
 
 export function generateRestHandlerContent(

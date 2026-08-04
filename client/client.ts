@@ -20,7 +20,10 @@ const PRISMA_SCALAR_IMPORTS: Record<string, string> = {
 const PRISMA_SCALAR_MAPPINGS: Record<string, string> = {
   String: 'string',
   Int: 'number',
+  Float: 'number',
   Boolean: 'boolean',
+  BigInt: 'number',
+  Bytes: 'string',
 };
 
 export function generateClientTypesContent(

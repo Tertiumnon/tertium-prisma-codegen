@@ -5,6 +5,7 @@ export interface ServerGeneratorConfig {
   entitiesDir: string;
   restRouterOut: string;
   graphqlResolversOut: string;
+  graphqlSchemaOut: string;
   searchablePatterns: RegExp[];
   enumIntPatterns: RegExp[];
   skipFilterable: string[];

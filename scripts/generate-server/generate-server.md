@@ -1,6 +1,6 @@
 # Backend Code Generation
 
-Generates TypeScript entity types, REST handlers, and GraphQL resolvers from Prisma schema.
+Generates TypeScript entity types, REST handlers, GraphQL resolvers, and a matching GraphQL schema (SDL) from Prisma schema.
 
 ## Usage
 
@@ -35,6 +35,9 @@ All options have sensible defaults based on typical project structures.
   - Default: `src/core/rest.router.auto.ts`
 - `--graphql-resolvers-out` - Output path for combined GraphQL resolvers
   - Default: `src/core/graphql.resolvers.auto.ts`
+- `--graphql-schema-out` - Output path for the generated GraphQL schema
+  - Default: `src/core/graphql.schema.auto.ts`
+  - Exports `typeDefs` (a template-literal string) — pass it straight to your GraphQL server library alongside `resolvers` from `{graphqlResolversOut}`
 
 ### Metadata Configuration
 
@@ -108,6 +111,11 @@ For each Prisma model, two files are generated:
 - `{graphqlResolversOut}` - Combined GraphQL resolvers
   - Query resolvers for listing, getting, filtering
   - Mutation resolvers for creating, updating, deleting
+- `{graphqlSchemaOut}` - GraphQL schema (SDL) matching the resolvers exactly
+  - An object type, `{Model}List` type, and `Create{Model}Input`/`Update{Model}Input` per entity
+  - `scalar JSON` (used for the `filter` args and any Prisma `Json` fields) and `scalar DateTime` (Prisma `DateTime` fields — serializes real `Date` objects to ISO strings)
+  - Root `Query` and `Mutation` types, restricted to entities that actually have resolvers (same set `inferEntityMetadata` produced)
+  - You must supply the runtime implementation for the `JSON` and `DateTime` scalars when building the executable schema — e.g. via the `graphql-scalars` package's `JSONResolver` and `DateTimeResolver`
 
 ## Metadata Inference
 
