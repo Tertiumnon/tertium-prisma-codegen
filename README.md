@@ -158,7 +158,7 @@ spawn('bun', [
   script,
   '--api', 'http://localhost:8080',
   '--entities-dir', 'src/app/entities',
-  '--scalars-import', '../../core/generated/api.scalars',
+  '--scalars-import', '../../core/api/api.scalars',
   // ... other project-specific args
 ], { stdio: 'inherit' });
 ```

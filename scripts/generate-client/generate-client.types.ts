@@ -1,7 +1,6 @@
 export interface ClientGeneratorConfig {
   apiUrl: string;
   entitiesDir: string;
-  entityImportBase: string;
   graphqlRequestImport: string;
   apiTypesImport: string;
   tableSchemaImport: string;

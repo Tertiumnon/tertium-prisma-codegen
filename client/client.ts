@@ -29,7 +29,7 @@ export function generateClientTypesContent(
   enums: EnumMeta[],
   config: ClientTypesConfig,
 ): string {
-  const { entityImportBase, enumsImport, scalarsImport = '@prisma/client' } = config;
+  const { enumsImport, scalarsImport = '@prisma/client' } = config;
 
   const entityNames = new Set(allEntities.map((e) => e.name));
   const enumNames = new Set(enums.map((e) => e.name));
@@ -46,11 +46,13 @@ export function generateClientTypesContent(
     else if (PRISMA_SCALAR_IMPORTS[baseType]) scalarImports.add(baseType);
   }
 
+  // Every entity file lives at {entitiesDir}/{kebab}/, so a sibling entity is always
+  // exactly one level up regardless of where entitiesDir itself is in the project.
   const entityImports = Array.from(entitiesToImport)
     .sort()
     .map((type) => {
       const kebab = _toKebabCase(type);
-      return `import type { ${type} } from '${entityImportBase}/${kebab}/${kebab}.types.auto';`;
+      return `import type { ${type} } from '../${kebab}/${kebab}.types.auto';`;
     })
     .join('\n');
 

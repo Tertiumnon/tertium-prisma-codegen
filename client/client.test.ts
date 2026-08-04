@@ -106,7 +106,6 @@ const statusEnum: EnumMeta = {
 describe('generateClientTypesContent', () => {
   it('generates TypeScript interface for entity', () => {
     const output = generateClientTypesContent(userEntity, [userEntity], [], {
-      entityImportBase: '../../entities',
       enumsImport: '../../enums',
     });
 
@@ -118,12 +117,39 @@ describe('generateClientTypesContent', () => {
 
   it('imports related entities when fields reference them', () => {
     const output = generateClientTypesContent(postEntity, [userEntity, postEntity], [], {
-      entityImportBase: '../../entities',
       enumsImport: '../../enums',
     });
 
     expect(output).toContain('export interface Post');
     expect(output).toContain('userId');
+  });
+
+  it('imports a related entity type via a sibling-relative path, regardless of entitiesDir depth', () => {
+    const postWithAuthor: EntityMeta = {
+      ...postEntity,
+      fields: [
+        ...postEntity.fields,
+        {
+          name: 'Author',
+          prismaType: 'User',
+          tsType: 'User',
+          formType: 'relation',
+          required: false,
+          isPrimary: false,
+          isRelation: true,
+          isArray: false,
+          relationModel: 'User',
+        },
+      ],
+    };
+
+    const output = generateClientTypesContent(postWithAuthor, [userEntity, postWithAuthor], [], {
+      enumsImport: '../../enums',
+    });
+
+    // Entity files always live at {entitiesDir}/{kebab}/, so a sibling entity is
+    // always exactly one level up — no entitiesDir-specific config should be needed.
+    expect(output).toContain("import type { User } from '../user/user.types.auto';");
   });
 
   it('imports enums when entity uses them', () => {
@@ -146,7 +172,6 @@ describe('generateClientTypesContent', () => {
     };
 
     const output = generateClientTypesContent(entityWithEnum, [userEntity, postEntity], [statusEnum], {
-      entityImportBase: '../../entities',
       enumsImport: '../../enums',
     });
 
@@ -174,7 +199,6 @@ describe('generateClientTypesContent', () => {
     };
 
     const output = generateClientTypesContent(entityWithOptionalEnum, [userEntity, postEntity], [statusEnum], {
-      entityImportBase: '../../entities',
       enumsImport: '../../enums',
     });
 

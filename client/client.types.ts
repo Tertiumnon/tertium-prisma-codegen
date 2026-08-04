@@ -1,7 +1,6 @@
 // ── Config types ──────────────────────────────────────────────────────────────
 
 export interface ClientTypesConfig {
-  entityImportBase: string;
   enumsImport: string;
   scalarsImport?: string;
 }

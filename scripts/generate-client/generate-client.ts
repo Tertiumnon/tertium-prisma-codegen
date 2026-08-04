@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, relative, dirname, sep } from 'path';
 import type { EntityMeta, EnumMeta } from '../../dmmf/dmmf.types';
 import {
   generateClientTypesContent,
@@ -38,7 +38,6 @@ function getArgList(name: string, defaultValue: string[] = []): string[] {
 const config: ClientGeneratorConfig = {
   apiUrl: getArg('api'),
   entitiesDir: getArg('entities-dir', DEFAULT_CONFIG.entitiesDir),
-  entityImportBase: getArg('entity-import-base', DEFAULT_CONFIG.entityImportBase),
   graphqlRequestImport: getArg('graphql-request-import', DEFAULT_CONFIG.graphqlRequestImport),
   apiTypesImport: getArg('api-types-import', DEFAULT_CONFIG.apiTypesImport),
   tableSchemaImport: getArg('table-schema-import', DEFAULT_CONFIG.tableSchemaImport),
@@ -68,6 +67,13 @@ function write(path: string, content: string): void {
   writeFileSync(path, content, 'utf-8');
 }
 
+// Barrel files can live anywhere; compute the real relative path back to
+// entitiesDir instead of asking the caller to hand-calculate it.
+function barrelImportBase(outPath: string): string {
+  const rel = relative(dirname(outPath), config.entitiesDir).split(sep).join('/');
+  return rel === '' ? '.' : rel;
+}
+
 if (existsSync(config.entitiesDir)) {
   const activeKebabs = new Set(entities.map((e) => e.kebab));
   for (const entry of readdirSync(config.entitiesDir, { withFileTypes: true })) {
@@ -84,7 +90,6 @@ for (const entity of entities) {
   write(
     join(dir, `${entity.kebab}.types.auto.ts`),
     generateClientTypesContent(entity, entities, enums, {
-      entityImportBase: config.entityImportBase,
       enumsImport: config.enumsImport,
       scalarsImport: config.scalarsImport,
     }),
@@ -112,12 +117,18 @@ for (const entity of entities) {
   console.log(`  ✓ entities/${entity.kebab}/`);
 }
 
-write(config.clientBarrelOut, generateClientBarrelContent(entities, { entityImportBase: config.entityImportBase }));
+write(config.clientBarrelOut, generateClientBarrelContent(entities, { entityImportBase: barrelImportBase(config.clientBarrelOut) }));
 write(
   config.typesBarrelOut,
-  generateTypesBarrelContent(entities, enums, { entityImportBase: config.entityImportBase, enumsImport: config.enumsImport }),
+  generateTypesBarrelContent(entities, enums, {
+    entityImportBase: barrelImportBase(config.typesBarrelOut),
+    enumsImport: config.enumsImport,
+  }),
 );
-write(config.schemasBarrelOut, generateSchemasBarrelContent(entities, { entityImportBase: config.entityImportBase }));
+write(
+  config.schemasBarrelOut,
+  generateSchemasBarrelContent(entities, { entityImportBase: barrelImportBase(config.schemasBarrelOut) }),
+);
 write(config.enumsOut, generateEnumsContent(enums));
 write(config.tableSchemaOut, generateTableSchemaTypeContent());
 

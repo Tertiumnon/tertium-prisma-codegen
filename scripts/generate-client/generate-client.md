@@ -19,7 +19,13 @@ All options have sensible defaults based on typical project structures.
 ### Directories & Paths
 
 - `--entities-dir` - Where to write generated entity files (default: `src/entities`)
-- `--entity-import-base` - Relative path from entity dir back to entities root (default: `../../entities`)
+
+Entity-to-entity type imports (e.g. `Post` importing `User`) and barrel-to-entities
+imports are both computed automatically — there is no `--entity-import-base` flag.
+Every entity file lives at `{entities-dir}/{kebab}/`, so a sibling entity is always
+exactly one directory level up; barrel files can live anywhere, and their relative
+path back to `--entities-dir` is derived from the two real output paths at generation
+time. This removes a whole class of "I miscounted the `../`s" bugs.
 
 ### Import Paths
 
@@ -28,13 +34,13 @@ All options have sensible defaults based on typical project structures.
 - `--api-types-import` - Import path for types barrel (ApiList, PaginationInput, etc.)
   - Default: `../../core/graphql/graphql.types.auto`
 - `--table-schema-import` - Import path used by `*.schema.auto.ts` to import the `TableSchema` type
-  - Default: `../../core/rest/rest.types`
+  - Default: `../../core/rest/rest.types.auto`
   - Must resolve to wherever `--table-schema-out` writes the type file
 - `--options-service-import` - Import path for entity options loader service
   - Default: `../../core/graphql/graphql.service`
 - `--scalars-import` - Import path for Prisma scalar types (DateTime, Decimal, Json)
   - Default: `@prisma/client`
-  - Tip: Use `../../core/generated/api.scalars` for frontend projects without Prisma
+  - Tip: Use a hand-written local module (e.g. `../../core/api/api.scalars`) for frontend projects without Prisma
 
 ### Output Paths
 
@@ -47,7 +53,7 @@ All options have sensible defaults based on typical project structures.
 - `--schemas-barrel-out` - Output path for schemas barrel
   - Default: `src/core/rest/rest.schemas.auto.ts`
 - `--table-schema-out` - Output path for the generated `TableSchema` type file
-  - Default: `src/core/rest/rest.types.ts`
+  - Default: `src/core/rest/rest.types.auto.ts`
   - Must match the resolved location of `--table-schema-import`
 - `--enums-import` - Enum import path used inside types barrel
   - Default: `./graphql.enums.auto`
@@ -74,8 +80,7 @@ bun scripts/generate-client/generate-client.ts --api http://localhost:8080
 ```bash
 bun scripts/generate-client/generate-client.ts \
   --api http://localhost:8080 \
-  --entities-dir src/app/entities \
-  --entity-import-base ..
+  --entities-dir src/app/entities
 ```
 
 ### Frontend project with custom scalars
@@ -84,10 +89,9 @@ bun scripts/generate-client/generate-client.ts \
 bun scripts/generate-client/generate-client.ts \
   --api http://localhost:8080 \
   --entities-dir src/app/entities \
-  --entity-import-base .. \
-  --scalars-import ../../core/generated/api.scalars \
+  --scalars-import ../../core/api/api.scalars \
   --graphql-request-import ../../core/api/graphql.client \
-  --api-types-import ../../core/generated/api.types.auto
+  --api-types-import ../../core/api/api.types.auto
 ```
 
 ## Generated Files
