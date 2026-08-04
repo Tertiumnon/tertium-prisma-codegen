@@ -11,7 +11,8 @@ import {
   generateTypesBarrelContent,
   generateSchemasBarrelContent,
   generateEnumsContent,
-} from '../../client';
+  generateTableSchemaTypeContent,
+} from '../../client/client';
 import { DEFAULT_CONFIG } from './generate-client.constants';
 import type { ClientGeneratorConfig } from './generate-client.types';
 
@@ -41,6 +42,7 @@ const config: ClientGeneratorConfig = {
   graphqlRequestImport: getArg('graphql-request-import', DEFAULT_CONFIG.graphqlRequestImport),
   apiTypesImport: getArg('api-types-import', DEFAULT_CONFIG.apiTypesImport),
   tableSchemaImport: getArg('table-schema-import', DEFAULT_CONFIG.tableSchemaImport),
+  tableSchemaOut: getArg('table-schema-out', DEFAULT_CONFIG.tableSchemaOut),
   optionsServiceImport: getArg('options-service-import', DEFAULT_CONFIG.optionsServiceImport),
   clientBarrelOut: getArg('client-barrel-out', DEFAULT_CONFIG.clientBarrelOut),
   typesBarrelOut: getArg('types-barrel-out', DEFAULT_CONFIG.typesBarrelOut),
@@ -117,9 +119,11 @@ write(
 );
 write(config.schemasBarrelOut, generateSchemasBarrelContent(entities, { entityImportBase: config.entityImportBase }));
 write(config.enumsOut, generateEnumsContent(enums));
+write(config.tableSchemaOut, generateTableSchemaTypeContent());
 
 console.log(`\n  ✓ ${config.clientBarrelOut}`);
 console.log(`  ✓ ${config.typesBarrelOut}`);
 console.log(`  ✓ ${config.schemasBarrelOut}`);
 console.log(`  ✓ ${config.enumsOut}`);
+console.log(`  ✓ ${config.tableSchemaOut}`);
 console.log(`\n✅ Done — ${entities.length} entities generated.\n`);

@@ -11,7 +11,7 @@ import {
   generateRestHandlerContent,
   generateRestRouterContent,
   generateGraphQLResolversContent,
-} from '../../server';
+} from '../../server/server';
 import { DEFAULT_CONFIG } from './generate-server.constants';
 import type { ServerGeneratorConfig } from './generate-server.types';
 

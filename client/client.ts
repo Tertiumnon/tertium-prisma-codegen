@@ -101,6 +101,36 @@ ${fields}
 `;
 }
 
+// ── Table schema type generator ────────────────────────────────────────────────
+
+export function generateTableSchemaTypeContent(): string {
+  return `/**
+ * Table Schema Types — auto-generated, do not edit
+ */
+
+export interface EntityOption {
+  value: string;
+  label: string;
+}
+
+export interface TableFieldConfig {
+  name: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  optionsLoader?: () => Promise<EntityOption[]>;
+}
+
+export interface TableSchema {
+  name: string;
+  displayName: string;
+  primaryKey: string;
+  sortField: string;
+  fields: TableFieldConfig[];
+}
+`;
+}
+
 // ── Schema generator ──────────────────────────────────────────────────────────
 
 function _prettifyLabel(name: string): string {

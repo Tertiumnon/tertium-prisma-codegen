@@ -5,6 +5,7 @@ export interface ClientGeneratorConfig {
   graphqlRequestImport: string;
   apiTypesImport: string;
   tableSchemaImport: string;
+  tableSchemaOut: string;
   optionsServiceImport: string;
   clientBarrelOut: string;
   typesBarrelOut: string;

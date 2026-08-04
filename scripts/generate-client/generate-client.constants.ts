@@ -4,6 +4,7 @@ export const DEFAULT_CONFIG = {
   graphqlRequestImport: '../../core/graphql/graphql.client',
   apiTypesImport: '../../core/graphql/graphql.types.auto',
   tableSchemaImport: '../../core/rest/rest.types',
+  tableSchemaOut: 'src/core/rest/rest.types.ts',
   optionsServiceImport: '../../core/graphql/graphql.service',
   clientBarrelOut: 'src/core/graphql/graphql.client.auto.ts',
   typesBarrelOut: 'src/core/graphql/graphql.types.auto.ts',
@@ -23,7 +24,8 @@ Options (all optional with sensible defaults):
   --entity-import-base           Path from entities back to root
   --graphql-request-import       Import path for graphQL request function
   --api-types-import             Import path for API types barrel
-  --table-schema-import          Import path for TableSchema type
+  --table-schema-import          Import path for TableSchema type (matches --table-schema-out)
+  --table-schema-out             Output path for generated TableSchema type file
   --options-service-import       Import path for entity options loader
   --client-barrel-out            Output path for client barrel
   --types-barrel-out             Output path for types barrel

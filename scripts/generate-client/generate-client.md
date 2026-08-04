@@ -27,8 +27,9 @@ All options have sensible defaults based on typical project structures.
   - Default: `../../core/graphql/graphql.client`
 - `--api-types-import` - Import path for types barrel (ApiList, PaginationInput, etc.)
   - Default: `../../core/graphql/graphql.types.auto`
-- `--table-schema-import` - Import path for TableSchema type
+- `--table-schema-import` - Import path used by `*.schema.auto.ts` to import the `TableSchema` type
   - Default: `../../core/rest/rest.types`
+  - Must resolve to wherever `--table-schema-out` writes the type file
 - `--options-service-import` - Import path for entity options loader service
   - Default: `../../core/graphql/graphql.service`
 - `--scalars-import` - Import path for Prisma scalar types (DateTime, Decimal, Json)
@@ -45,6 +46,9 @@ All options have sensible defaults based on typical project structures.
   - Default: `src/core/graphql/graphql.enums.auto.ts`
 - `--schemas-barrel-out` - Output path for schemas barrel
   - Default: `src/core/rest/rest.schemas.auto.ts`
+- `--table-schema-out` - Output path for the generated `TableSchema` type file
+  - Default: `src/core/rest/rest.types.ts`
+  - Must match the resolved location of `--table-schema-import`
 - `--enums-import` - Enum import path used inside types barrel
   - Default: `./graphql.enums.auto`
 
@@ -102,6 +106,7 @@ For each entity, three files are generated:
 - `{clientBarrelOut}` - Re-exports all client functions
 - `{schemasBarrelOut}` - Re-exports all table schemas
 - `{enumsOut}` - All enum definitions from the API
+- `{tableSchemaOut}` - `TableSchema`, `TableFieldConfig`, and `EntityOption` type definitions consumed by every `*.schema.auto.ts`
 
 ## Configuration via Package.json
 
