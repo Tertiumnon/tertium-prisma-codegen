@@ -11,6 +11,18 @@ import type {
 
 // ── Types generator ───────────────────────────────────────────────────────────
 
+const PRISMA_SCALAR_IMPORTS: Record<string, string> = {
+  DateTime: '@prisma/client',
+  Decimal: '@prisma/client',
+  Json: '@prisma/client',
+};
+
+const PRISMA_SCALAR_MAPPINGS: Record<string, string> = {
+  String: 'string',
+  Int: 'number',
+  Boolean: 'boolean',
+};
+
 export function generateClientTypesContent(
   entity: EntityMeta,
   allEntities: EntityMeta[],
@@ -24,12 +36,14 @@ export function generateClientTypesContent(
 
   const entitiesToImport = new Set<string>();
   const enumsToImport = new Set<string>();
+  const scalarImports = new Set<string>();
 
   for (const f of entity.fields) {
     if (!f.tsType || f.tsType === entity.name) continue;
     const baseType = f.tsType.endsWith(' | null') ? f.tsType.slice(0, -' | null'.length) : f.tsType;
     if (f.isRelation && entityNames.has(baseType)) entitiesToImport.add(baseType);
     else if (enumNames.has(baseType)) enumsToImport.add(baseType);
+    else if (PRISMA_SCALAR_IMPORTS[baseType]) scalarImports.add(baseType);
   }
 
   const entityImports = Array.from(entitiesToImport)
@@ -45,7 +59,12 @@ export function generateClientTypesContent(
       ? `import { ${Array.from(enumsToImport).sort().join(', ')} } from '${enumsImport}';`
       : '';
 
-  const importSection = [entityImports, enumImport].filter(Boolean).join('\n');
+  const scalarImport =
+    scalarImports.size > 0
+      ? `import type { ${Array.from(scalarImports).sort().join(', ')} } from '@prisma/client';`
+      : '';
+
+  const importSection = [entityImports, enumImport, scalarImport].filter(Boolean).join('\n');
 
   const fields = entity.fields
     .map((f) => {
@@ -55,10 +74,14 @@ export function generateClientTypesContent(
         return `  ${f.name}${optional}: ${f.tsType}${f.required ? '' : ' | null'};`;
       }
       let fieldType = f.tsType;
-      if (
+      const baseType = f.tsType.endsWith(' | null') ? f.tsType.slice(0, -' | null'.length) : f.tsType;
+      if (PRISMA_SCALAR_MAPPINGS[baseType]) {
+        fieldType = f.tsType.replace(baseType, PRISMA_SCALAR_MAPPINGS[baseType]);
+      } else if (
         f.isRelation &&
         !entityNames.has(f.tsType) &&
         !enumNames.has(f.tsType) &&
+        !PRISMA_SCALAR_IMPORTS[baseType] &&
         /^[A-Z]/.test(f.tsType) &&
         !f.tsType.includes('|')
       ) {
