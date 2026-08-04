@@ -3,6 +3,7 @@
 export interface ClientTypesConfig {
   entityImportBase: string;
   enumsImport: string;
+  scalarsImport?: string;
 }
 
 export interface ClientSchemaConfig {

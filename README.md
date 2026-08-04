@@ -52,42 +52,68 @@ Prisma schema
 npm install @tertium/prisma-codegen
 ```
 
+## Scripts
+
+This package includes two CLI-driven code generation scripts. All configuration is passed via command-line arguments — no script editing needed.
+
+### Backend: [generate-server](./scripts/generate-server/generate-server.md)
+
+Generates REST handlers and GraphQL resolvers from your Prisma schema.
+
+```bash
+bun scripts/generate-server/generate-server.ts [options]
+```
+
+**Generates:**
+- Entity TypeScript types
+- REST CRUD handlers
+- GraphQL query/mutation resolvers
+- Combined router and resolver files
+
+**Example:**
+```bash
+bun node_modules/@tertium/prisma-codegen/scripts/generate-server/generate-server.ts \
+  --entities-dir src/entities \
+  --searchable-patterns name,title,description
+```
+
+[Full documentation →](./scripts/generate-server/generate-server.md)
+
+### Frontend: [generate-client](./scripts/generate-client/generate-client.md)
+
+Generates TypeScript types and GraphQL clients from API entity metadata.
+
+```bash
+bun scripts/generate-client/generate-client.ts --api <url> [options]
+```
+
+**Generates:**
+- Entity TypeScript types
+- GraphQL query/mutation functions
+- Table schemas for forms
+- Type and client barrel files
+
+**Example:**
+```bash
+bun node_modules/@tertium/prisma-codegen/scripts/generate-client/generate-client.ts \
+  --api http://localhost:8080 \
+  --entities-dir src/entities \
+  --scalars-import ./api.scalars
+```
+
+[Full documentation →](./scripts/generate-client/generate-client.md)
+
 ## Quick start
 
-### 1. Copy script templates
-
-Copy the two generation scripts into your project:
+### 1. Backend: Generate server code
 
 ```bash
-cp node_modules/@tertium/prisma-codegen/scripts/generate-server.ts scripts/generate-server.ts
-cp node_modules/@tertium/prisma-codegen/scripts/generate-client.ts scripts/generate-client.ts
+bun node_modules/@tertium/prisma-codegen/scripts/generate-server/generate-server.ts
 ```
 
-### 2. Generate backend code
+Uses default config. All paths adjustable via CLI arguments.
 
-Edit `scripts/generate-server.ts` and set your paths:
-
-```ts
-const PRISMA_CLIENT_IMPORT  = './generated/prisma/client';
-const PRISMA_SINGLETON_PATH = '../db/prisma';
-const GRAPHQL_CONTEXT_PATH  = './graphql.context';
-const ENTITIES_DIR          = 'src/entities';
-const REST_ROUTER_OUT       = 'src/core/rest.router.auto.ts';
-const GRAPHQL_RESOLVERS_OUT = 'src/core/graphql.resolvers.auto.ts';
-
-// Customize filtering/search behavior:
-const SEARCHABLE_PATTERNS: RegExp[] = [/name/i, /title/i];
-const ENUM_INT_PATTERNS:   RegExp[] = [];
-const SKIP_FILTERABLE:     string[] = [];
-```
-
-Then run:
-
-```bash
-bun scripts/generate-server.ts
-```
-
-### 3. Expose `/entities` endpoint
+### 2. Expose `/entities` endpoint
 
 Add this to your backend to serve entity metadata:
 
@@ -108,24 +134,44 @@ const { entities, enums } = dmmfToEntityMeta(dmmfModels, dmmfEnums);
 // Return from GET /entities endpoint
 ```
 
-### 4. Generate frontend code
-
-Edit `scripts/generate-client.ts` and set your paths:
-
-```ts
-const ENTITIES_DIR        = 'src/entities';
-const ENTITY_IMPORT_BASE  = '../../entities';
-const GRAPHQL_REQUEST_IMPORT = '../../core/graphql/graphql.client';
-const API_TYPES_IMPORT    = '../../core/graphql/graphql.types.auto';
-const TABLE_SCHEMA_IMPORT = '../../core/rest/rest.types';
-const OPTIONS_SERVICE_IMPORT = '../../core/graphql/graphql.service';
-const SKIP_FIELDS         = ['id', 'createdAt', 'updatedAt'];
-```
-
-Then run:
+### 3. Frontend: Generate client code
 
 ```bash
-bun scripts/generate-client.ts --api http://localhost:8080
+bun node_modules/@tertium/prisma-codegen/scripts/generate-client/generate-client.ts \
+  --api http://localhost:8080
+```
+
+Uses default config. All paths adjustable via CLI arguments.
+
+## Configuration
+
+Rather than copying scripts and editing config, this package uses a **wrapper script pattern**:
+
+```ts
+// project/scripts/generate-client.ts (minimal wrapper)
+import { spawn } from 'child_process';
+import { resolve } from 'path';
+
+const script = resolve('./node_modules/@tertium/prisma-codegen/scripts/generate-client/generate-client.ts');
+
+spawn('bun', [
+  script,
+  '--api', 'http://localhost:8080',
+  '--entities-dir', 'src/app/entities',
+  '--scalars-import', '../../core/generated/api.scalars',
+  // ... other project-specific args
+], { stdio: 'inherit' });
+```
+
+Then in `package.json`:
+
+```json
+{
+  "scripts": {
+    "codegen": "bun scripts/generate-server.ts",
+    "codegen:client": "bun scripts/generate-client.ts"
+  }
+}
 ```
 
 ## Library structure
@@ -146,8 +192,16 @@ The library uses **direct imports only** — no central barrel files.
 │   ├── client.ts              # Generators
 │   └── client.test.ts         # Tests (12 tests)
 └── scripts/
-    ├── generate-server.ts
-    └── generate-client.ts
+    ├── generate-server/
+    │   ├── generate-server.ts           # Main script
+    │   ├── generate-server.types.ts     # Config interface
+    │   ├── generate-server.constants.ts # Defaults
+    │   └── generate-server.md           # Documentation
+    └── generate-client/
+        ├── generate-client.ts           # Main script
+        ├── generate-client.types.ts     # Config interface
+        ├── generate-client.constants.ts # Defaults
+        └── generate-client.md           # Documentation
 ```
 
 ## Import Rule

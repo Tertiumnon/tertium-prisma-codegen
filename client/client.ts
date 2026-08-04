@@ -29,7 +29,7 @@ export function generateClientTypesContent(
   enums: EnumMeta[],
   config: ClientTypesConfig,
 ): string {
-  const { entityImportBase, enumsImport } = config;
+  const { entityImportBase, enumsImport, scalarsImport = '@prisma/client' } = config;
 
   const entityNames = new Set(allEntities.map((e) => e.name));
   const enumNames = new Set(enums.map((e) => e.name));
@@ -61,7 +61,7 @@ export function generateClientTypesContent(
 
   const scalarImport =
     scalarImports.size > 0
-      ? `import type { ${Array.from(scalarImports).sort().join(', ')} } from '@prisma/client';`
+      ? `import type { ${Array.from(scalarImports).sort().join(', ')} } from '${scalarsImport}';`
       : '';
 
   const importSection = [entityImports, enumImport, scalarImport].filter(Boolean).join('\n');
