@@ -1,4 +1,6 @@
-import type { DMMFField, DMMFModel, FilterMode } from '../dmmf/dmmf.types';
+import type { DMMFField, DMMFModel, FilterMode, TranslationMetadata } from '../dmmf/dmmf.types';
+
+export type { TranslationMetadata };
 
 // ── Internal model types (used by server generators) ─────────────────────────
 
@@ -28,6 +30,8 @@ export type EntityMetadata = {
   searchableFields?: string[];
   includeRelations?: string[];
   orderBy?: string;
+  /** Set when this model has a detected `<Model>Translation` relation - see TranslationMetadata. */
+  translation?: TranslationMetadata;
 };
 
 // ── Generator option/config types ─────────────────────────────────────────────
@@ -41,6 +45,10 @@ export type MetadataInferrerOptions = {
    * The first field name that exists on the model wins. If none match, falls back to the primary key.
    */
   orderByFieldPreference?: string[];
+  /** Suffix identifying a per-entity translation table by convention. Defaults to 'Translation'. */
+  translationModelSuffix?: string;
+  /** Model names to exclude from translation-relation auto-detection even if they match the naming convention. */
+  skipTranslationDetection?: string[];
 };
 
 export type TypesGeneratorOptions = {
@@ -63,11 +71,24 @@ export type GraphQLResolverConfig = {
   contextTypePath: string;
   contextTypeExport?: string;
   localization?: LocalizationConfig;
+  /**
+   * Whether the target Prisma datasource supports the `mode: 'insensitive'` StringFilter
+   * option - Postgres does; MySQL/SQLite do not (Prisma Client omits `mode` from their
+   * `StringFilter` type entirely, and passing it throws "Unknown argument `mode`" at runtime,
+   * not just a type error). Defaults to `true` (Postgres, the original assumption this
+   * generator was built under) for backward compatibility - MySQL/SQLite consumers must pass
+   * `false` explicitly. When `false`, `contains` filters (per-field `filter.<field>`,
+   * `filter.search`, and the Translation-table search) are emitted without `mode`, relying on
+   * the database's own default collation for case-insensitivity instead.
+   */
+  caseInsensitiveSearch?: boolean;
 };
 
 export type RestHandlerConfig = {
   prismaClientPath: string;
   localization?: LocalizationConfig;
+  /** See `GraphQLResolverConfig.caseInsensitiveSearch` - same meaning, REST twin. */
+  caseInsensitiveSearch?: boolean;
 };
 
 export type RestRouterConfig = {

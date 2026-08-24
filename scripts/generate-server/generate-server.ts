@@ -91,7 +91,7 @@ for (const model of models) {
   const dir = join(config.entitiesDir, kebab);
   mkdirSync(dir, { recursive: true });
 
-  writeFileSync(join(dir, `${kebab}.types.auto.ts`), generateEntityTypesContent(model));
+  writeFileSync(join(dir, `${kebab}.types.auto.ts`), generateEntityTypesContent(model, metadata));
   writeFileSync(
     join(dir, `${kebab}.rest.auto.ts`),
     generateRestHandlerContent(model.name, metadata[model.name] ?? {}, {

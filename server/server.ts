@@ -1,4 +1,5 @@
 import type { DMMFField, DMMFModel } from '../dmmf/dmmf.types';
+import { detectTranslationRelations } from '../dmmf/dmmf.utils';
 import type {
   EntityMetadata,
   Field,
@@ -83,17 +84,38 @@ export function inferEntityMetadata(
     searchableFieldPatterns = [],
     enumLikeIntPatterns = [],
     orderByFieldPreference = [],
+    translationModelSuffix = 'Translation',
+    skipTranslationDetection = [],
   } = options;
   const skipSet = new Set(skipFilterableFields);
   const metadata: Record<string, EntityMetadata> = {};
 
+  const translationOwners = detectTranslationRelations(dmmfModels, {
+    translationModelSuffix,
+    skip: skipTranslationDetection,
+  });
+  const translationModelNames = new Set(
+    Array.from(translationOwners.values()).map((t) => t.translationModelName),
+  );
+
   for (const model of dmmfModels) {
+    // `<Model>Translation` tables are an implementation detail of their parent, never a
+    // first-class entity in their own right - no metadata, no resolvers, no REST routes.
+    if (translationModelNames.has(model.name)) continue;
+
+    const translation = translationOwners.get(model.name);
     const filterable: Record<string, 'contains' | 'equals'> = {};
     const searchableFields: string[] = [];
     const includeRelations: string[] = [];
 
     for (const field of model.fields) {
       if (field.kind === 'object') {
+        if (translation && field.name === translation.relationName) continue; // handled via `translation`, not a flat include
+        // A translation model is never a first-class entity anywhere, not just from its own
+        // owner's side - e.g. `Language.creatureTranslations: CreatureTranslation[]` must also
+        // be excluded, or Language ends up with a flat include/type reference to a model that
+        // was never generated its own type/resolver for.
+        if (translationModelNames.has(field.type)) continue;
         includeRelations.push(field.name);
         continue;
       }
@@ -119,11 +141,29 @@ export function inferEntityMetadata(
     }
     const orderBy = orderByFieldPreference.find((n) => fieldNameSet.has(n)) ?? primaryKey;
 
-    if (Object.keys(filterable).length > 0 || searchableFields.length > 0 || includeRelations.length > 0) {
+    // Same scoping as base-column `searchableFields` above (matched against
+    // `searchableFieldPatterns`) - a long-form `details`/lore field shouldn't make `filter.search`
+    // match every item whose flavor text happens to mention the query term. Falls back to every
+    // translation field if none match the patterns, so an entity whose translatable field names
+    // don't happen to match (e.g. only `value`) still gets a working search rather than none.
+    const translationWithSearchScope = translation && {
+      ...translation,
+      ...(searchableFieldPatterns.length > 0 && {
+        searchableFields: translation.fields.filter((f) => searchableFieldPatterns.some((p) => p.test(f))),
+      }),
+    };
+
+    if (
+      Object.keys(filterable).length > 0 ||
+      searchableFields.length > 0 ||
+      includeRelations.length > 0 ||
+      translation
+    ) {
       metadata[model.name] = {
         ...(Object.keys(filterable).length > 0 && { filterable }),
         ...(searchableFields.length > 0 && { searchableFields }),
         ...(includeRelations.length > 0 && { includeRelations }),
+        ...(translationWithSearchScope && { translation: translationWithSearchScope }),
         orderBy,
       };
     }
@@ -132,27 +172,45 @@ export function inferEntityMetadata(
   return metadata;
 }
 
+/** Single source of truth for excluding a `<Model>Translation` table from anything metadata-blind
+ * (object types, REST directories, the types file) - it's never a first-class entity. */
+export function isTranslationModel(modelName: string, metadata: Record<string, EntityMetadata>): boolean {
+  return Object.values(metadata).some((m) => m.translation?.translationModelName === modelName);
+}
+
 // ── Types generator ───────────────────────────────────────────────────────────
 
 const DEFAULT_SKIP_INPUT_FIELDS = new Set(['id', 'createdAt', 'updatedAt']);
 
-export function generateEntityTypesContent(model: Model, options: TypesGeneratorOptions = {}): string {
+export function generateEntityTypesContent(
+  model: Model,
+  allMetadata: Record<string, EntityMetadata>,
+  options: TypesGeneratorOptions = {},
+): string {
   const skipInputFields = options.skipInputFields ? new Set(options.skipInputFields) : DEFAULT_SKIP_INPUT_FIELDS;
   const relationImportPath = options.relationImportPath ?? ((name: string) => `../${toKebabCase(name)}/${toKebabCase(name)}.types.auto`);
+  const t = allMetadata[model.name]?.translation;
   const scalarFields = model.fields.filter((f) => !f.isRelation);
-  const relationFields = model.fields.filter((f) => f.isRelation);
+  // Exclude this model's own translation relation (handled by flattening below) AND any relation
+  // to a `<Model>Translation` table from ANOTHER model's side (e.g. `Language.creatureTranslations`)
+  // - a translation model is never a first-class entity anywhere, so it never gets its own
+  // generated type to import/reference.
+  const relationFields = model.fields.filter(
+    (f) => f.isRelation && !(t && f.name === t.relationName) && !isTranslationModel(f.type, allMetadata),
+  );
 
   const mainFields = [
     ...scalarFields.map((f) => `  ${f.name}${f.required ? '' : '?'}: ${prismaToTsType(f.type)};`),
+    ...(t ? t.fields.map((name) => `  ${name}?: string;`) : []),
     ...relationFields.map((f) =>
       f.isArray ? `  ${f.name}${f.required ? '' : '?'}: ${f.type}[];` : `  ${f.name}${f.required ? '' : '?'}: ${f.type} | null;`,
     ),
   ].join('\n');
 
-  const inputFields = scalarFields
-    .filter((f) => !skipInputFields.has(f.name))
-    .map((f) => `  ${f.name}${f.required ? '' : '?'}: ${prismaToTsType(f.type)};`)
-    .join('\n');
+  const inputFields = [
+    ...scalarFields.filter((f) => !skipInputFields.has(f.name)).map((f) => `  ${f.name}${f.required ? '' : '?'}: ${prismaToTsType(f.type)};`),
+    ...(t ? [`  lang: string;`, ...t.fields.map((name) => `  ${name}?: string;`)] : []),
+  ].join('\n');
 
   const relatedTypeNames = Array.from(new Set(relationFields.map((f) => f.type))).filter((name) => name !== model.name);
   const imports = relatedTypeNames.map((name) => `import type { ${name} } from '${relationImportPath(name)}';`).join('\n');
@@ -185,6 +243,7 @@ export type EntityMetadata = {
   searchableFields?: string[];
   includeRelations?: string[];
   orderBy?: string;
+  translation?: { relationName: string; translationModelName: string; fkFieldName: string; fields: string[]; searchableFields?: string[] };
 };
 
 export const GRAPHQL_ENTITY_METADATA: Record<string, EntityMetadata> = ${JSON.stringify(metadata, null, 2)};
@@ -223,6 +282,7 @@ export function generateGraphQLResolversContent(
     contextTypePath,
     contextTypeExport = 'GraphQLResolverContext',
     localization,
+    caseInsensitiveSearch = true,
   } = config;
 
   const dmmfModelMap = new Map(dmmfModels.map((m) => [m.name, m]));
@@ -246,7 +306,7 @@ export function generateGraphQLResolversContent(
       .join('\n') +
     '\n' +
     Object.entries(metadata)
-      .map(([name, meta]) => _buildListResolver(name, meta, localization))
+      .map(([name, meta]) => _buildListResolver(name, meta, localization, caseInsensitiveSearch))
       .join('\n');
 
   const mutationResolvers =
@@ -265,6 +325,17 @@ export function generateGraphQLResolversContent(
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
   const localizationImport = localization
     ? `\nimport { ${localizeExport} } from '${localization.localizeImport}';`
+    : '';
+  const hasTranslation = Object.values(metadata).some((m) => m.translation);
+  const flattenTranslationFn = hasTranslation
+    ? `\nfunction flattenTranslation(entity: any, relationName: string, fields: string[]): any {
+  if (!entity) return entity;
+  const { [relationName]: translations, ...rest } = entity;
+  const t = Array.isArray(translations) ? translations[0] : undefined;
+  for (const f of fields) rest[f] = t ? (t[f] ?? null) : null;
+  return rest;
+}
+`
     : '';
 
   return `/**
@@ -290,7 +361,7 @@ function validateInputIDs(input: any): string | null {
   }
   return null;
 }
-
+${flattenTranslationFn}
 ${transformFunctions ? transformFunctions + '\n' : ''}
 export interface ResolverContext extends ${contextTypeExport} {
   prisma: ${prismaClientExport};
@@ -344,35 +415,115 @@ ${transforms}
 }`;
 }
 
-function _buildFilterLogicGQL(metadata: EntityMetadata): string {
-  if (!metadata.filterable && !metadata.searchableFields?.length) return 'const where: any = {};';
+function _buildFilterLogicGQL(
+  modelName: string,
+  metadata: EntityMetadata,
+  localization?: LocalizationConfig,
+  caseInsensitiveSearch = true,
+): string {
+  const t = metadata.translation;
+  const hasSearch = (metadata.searchableFields?.length ?? 0) > 0 || !!t;
+  if (!metadata.filterable && !hasSearch) return 'const where: any = {};';
+
+  // Postgres needs `mode: 'insensitive'` for case-insensitive `contains`; MySQL/SQLite don't
+  // support that StringFilter option at all (Prisma Client rejects it at runtime, not just in
+  // types) and are case-insensitive by default collation already. See
+  // GraphQLResolverConfig.caseInsensitiveSearch doc comment.
+  const modeSuffix = caseInsensitiveSearch ? ", mode: 'insensitive'" : '';
 
   let code = 'const where: any = {};\n\n      if (filter) {';
   for (const [field, mode] of Object.entries(metadata.filterable ?? {})) {
     if (mode === 'contains') {
-      code += `\n        if (filter.${field}) where.${field} = typeof filter.${field} === 'string' ? { contains: filter.${field}, mode: 'insensitive' } : filter.${field};`;
+      code += `\n        if (filter.${field}) where.${field} = typeof filter.${field} === 'string' ? { contains: filter.${field}${modeSuffix} } : filter.${field};`;
     } else {
       code += `\n        if (filter.${field}) where.${field} = filter.${field};`;
     }
   }
-  if (metadata.searchableFields?.length) {
-    code += `\n        if (filter.search) {\n          where.OR = [`;
-    for (const field of metadata.searchableFields) {
-      code += `\n            { ${field}: { contains: filter.search, mode: 'insensitive' } },`;
+  if (hasSearch) {
+    code += `\n        if (filter.search) {`;
+    if (t) {
+      // Relational filter against the dedicated `<Model>Translation` table - replaces the
+      // polymorphic-`Translation` workaround entirely for entities using this pattern.
+      // Deliberately NOT scoped by `languageCode` - a query typed in either language must find
+      // matches regardless of which language is currently displayed.
+      code += `\n          where.OR = [`;
+      for (const field of metadata.searchableFields ?? []) {
+        code += `\n            { ${field}: { contains: filter.search${modeSuffix} } },`;
+      }
+      const searchFields = t.searchableFields?.length ? t.searchableFields : t.fields;
+      const orClauses = searchFields.map((f) => `{ ${f}: { contains: filter.search${modeSuffix} } }`).join(', ');
+      code += `\n            { ${t.relationName}: { some: { OR: [${orClauses}] } } },`;
+      code += `\n          ];`;
+    } else {
+      // Base columns hold one language directly; a translated value (the other language) lives
+      // in a `Translation` table instead. Search both, so a query typed in either language finds
+      // matches regardless of which language is currently displayed - not scoped to `lang`. Gated
+      // on `localization` (not just metadata) because this is a shared generator: only emit a
+      // `prisma.translation` query for projects that actually opted into the localization config,
+      // which is the same signal that guarantees a `Translation` model exists at all. Not further
+      // gated on whether *this* entity type is registered for translation - querying Translation
+      // for a type with zero rows is a cheap, correct no-op, simpler than teaching the generator
+      // about per-type translation registration (it has no DB access at generation time anyway).
+      if (localization) {
+        // Scoped to the same field set as the base-column OR below (not every Translation row for
+        // this entity type) so search covers the same logical fields regardless of which table
+        // currently holds the active language's value for them - e.g. a `details` translation
+        // shouldn't surface a match that a `details` value in the base language wouldn't.
+        const fieldList = metadata.searchableFields!.map((f) => `'${f}'`).join(', ');
+        code += `\n          const translationMatches = await prisma.translation.findMany({\n            where: { entityType: '${modelName}', fieldName: { in: [${fieldList}] }, value: { contains: filter.search${modeSuffix} } },\n            select: { entityId: true },\n          });`;
+      }
+      code += `\n          where.OR = [`;
+      for (const field of metadata.searchableFields ?? []) {
+        code += `\n            { ${field}: { contains: filter.search${modeSuffix} } },`;
+      }
+      code += `\n          ];`;
+      if (localization) {
+        code += `\n          if (translationMatches.length) where.OR.push({ id: { in: translationMatches.map((t: any) => t.entityId) } });`;
+      }
     }
-    code += `\n          ];\n        }`;
+    code += `\n        }`;
   }
   code += '\n      }';
   return code;
 }
 
-function _buildInclude(metadata: EntityMetadata): string {
-  if (!metadata.includeRelations?.length) return '';
-  return `include: {\n            ${metadata.includeRelations.map((r) => `${r}: true`).join(',\n            ')},\n          },`;
+function _buildInclude(metadata: EntityMetadata, langExpr?: string): string {
+  const parts = (metadata.includeRelations ?? []).map((r) => `${r}: true`);
+  if (metadata.translation && langExpr) {
+    parts.push(`${metadata.translation.relationName}: { where: { languageCode: ${langExpr} } }`);
+  }
+  if (parts.length === 0) return '';
+  return `include: {\n            ${parts.join(',\n            ')},\n          },`;
 }
 
 function _buildSingleResolver(modelName: string, metadata: EntityMetadata, localization?: LocalizationConfig): string {
   const camelCase = toCamelCase(modelName);
+  const t = metadata.translation;
+
+  if (t) {
+    const includeLogic = _buildInclude(metadata, 'lang');
+    const fieldsLiteral = JSON.stringify(t.fields);
+    return `
+    ${camelCase}: async (
+      _: any,
+      { id, lang }: { id: string; lang: string },
+      { prisma }: ResolverContext,
+    ) => {
+      if (!isValidUUID(id)) throw new Error('Invalid ID format - must be a valid UUID');
+      if (!lang) throw new Error("'lang' is required to fetch a ${modelName}");
+      try {
+        const data = await (prisma as any).${camelCase}.findUnique({
+          where: { id },
+          ${includeLogic}
+        });
+        return data ? flattenTranslation(data, '${t.relationName}', ${fieldsLiteral}) : null;
+      } catch (error) {
+        console.error('GraphQL error in ${camelCase} query:', error);
+        throw error;
+      }
+    },`;
+  }
+
   const includeLogic = _buildInclude(metadata);
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
   const args = localization ? `{ id, lang }: { id: string; lang?: string }` : `{ id }: { id: string }`;
@@ -400,14 +551,62 @@ ${returnLogic}
     },`;
 }
 
-function _buildListResolver(modelName: string, metadata: EntityMetadata, localization?: LocalizationConfig): string {
+function _buildListResolver(
+  modelName: string,
+  metadata: EntityMetadata,
+  localization?: LocalizationConfig,
+  caseInsensitiveSearch = true,
+): string {
   const camelCase = toCamelCase(modelName);
-  const filterLogic = _buildFilterLogicGQL(metadata);
-  const includeLogic = _buildInclude(metadata);
+  const t = metadata.translation;
+  const filterLogic = _buildFilterLogicGQL(modelName, metadata, localization, caseInsensitiveSearch);
   const orderBy = metadata.orderBy;
   if (!orderBy) {
     throw new Error(`Missing orderBy in metadata for "${modelName}"`);
   }
+
+  if (t) {
+    const includeLogic = _buildInclude(metadata, 'lang');
+    const fieldsLiteral = JSON.stringify(t.fields);
+    return `
+    ${camelCase}List: async (
+      _: any,
+      { filter, pagination, lang }: { filter?: any; pagination?: any; lang: string },
+      { prisma }: ResolverContext,
+    ) => {
+      if (!lang) throw new Error("'lang' is required to fetch a ${modelName}List");
+      try {
+        ${filterLogic}
+
+        if (pagination?.limit !== undefined && typeof pagination.limit !== 'number') {
+          throw new Error('Invalid pagination parameter: limit must be a positive integer');
+        }
+        if (pagination?.offset !== undefined && typeof pagination.offset !== 'number') {
+          throw new Error('Invalid pagination parameter: offset must be a non-negative integer');
+        }
+
+        const limit = Math.min(Math.max(pagination?.limit || 50, 1), 1000);
+        const offset = Math.max(pagination?.offset || 0, 0);
+
+        const [data, total] = await Promise.all([
+          (prisma as any).${camelCase}.findMany({
+            where,
+            ${includeLogic}
+            take: limit,
+            skip: offset,
+            orderBy: { ${orderBy}: 'asc' },
+          }),
+          (prisma as any).${camelCase}.count({ where }),
+        ]);
+        return { data: data.map((item: any) => flattenTranslation(item, '${t.relationName}', ${fieldsLiteral})), total };
+      } catch (error) {
+        console.error('GraphQL error in ${camelCase}List query:', error);
+        throw error;
+      }
+    },`;
+  }
+
+  const includeLogic = _buildInclude(metadata);
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
   const args = localization
     ? `{ filter, pagination, lang }: { filter?: any; pagination?: any; lang?: string }`
@@ -455,6 +654,39 @@ ${returnLogic}
 
 function _buildCreateResolver(modelName: string, metadata: EntityMetadata, fkFields?: ForeignKeyField[]): string {
   const camelCase = toCamelCase(modelName);
+  const t = metadata.translation;
+
+  if (t) {
+    const includeLogic = _buildInclude(metadata, 'lang');
+    const fieldsLiteral = JSON.stringify(t.fields);
+    const destructure = `const { lang, ${t.fields.join(', ')}, ...baseInput } = input;`;
+    const baseData = fkFields?.length ? `transform${modelName}InputToPrisma(baseInput)` : 'baseInput';
+    return `
+    create${modelName}: async (
+      _: any,
+      { input }: { input: any },
+      { prisma }: ResolverContext,
+    ) => {
+      ${destructure}
+      if (!lang) throw new Error("'lang' is required to create a ${modelName}");
+      const idError = validateInputIDs(baseInput);
+      if (idError) throw new Error(idError);
+      try {
+        const data = await (prisma as any).${camelCase}.create({
+          data: {
+            ...${baseData},
+            ${t.relationName}: { create: { languageCode: lang, ${t.fields.join(', ')} } },
+          },
+          ${includeLogic}
+        });
+        return flattenTranslation(data, '${t.relationName}', ${fieldsLiteral});
+      } catch (error) {
+        console.error('GraphQL error in create${modelName} mutation:', error);
+        throw error;
+      }
+    },`;
+  }
+
   const includeLogic = _buildInclude(metadata);
   const data = fkFields?.length ? `transform${modelName}InputToPrisma(input)` : 'input';
 
@@ -480,6 +712,48 @@ function _buildCreateResolver(modelName: string, metadata: EntityMetadata, fkFie
 
 function _buildUpdateResolver(modelName: string, metadata: EntityMetadata, fkFields?: ForeignKeyField[]): string {
   const camelCase = toCamelCase(modelName);
+  const t = metadata.translation;
+
+  if (t) {
+    const includeLogic = _buildInclude(metadata, 'lang');
+    const fieldsLiteral = JSON.stringify(t.fields);
+    const destructure = `const { lang, ${t.fields.join(', ')}, ...baseInput } = input;`;
+    const baseData = fkFields?.length ? `transform${modelName}InputToPrisma(baseInput)` : 'baseInput';
+    const translatableAssignments = t.fields.map((f) => `${f}`).join(', ');
+    return `
+    update${modelName}: async (
+      _: any,
+      { id, input }: { id: string; input: any },
+      { prisma }: ResolverContext,
+    ) => {
+      if (!isValidUUID(id)) throw new Error('Invalid ID format - must be a valid UUID');
+      ${destructure}
+      if (!lang) throw new Error("'lang' is required to update a ${modelName}");
+      const idError = validateInputIDs(baseInput);
+      if (idError) throw new Error(idError);
+      try {
+        const data = await (prisma as any).${camelCase}.update({
+          where: { id },
+          data: {
+            ...${baseData},
+            ${t.relationName}: {
+              upsert: {
+                where: { ${t.fkFieldName}_languageCode: { ${t.fkFieldName}: id, languageCode: lang } },
+                create: { languageCode: lang, ${translatableAssignments} },
+                update: { ${translatableAssignments} },
+              },
+            },
+          },
+          ${includeLogic}
+        });
+        return flattenTranslation(data, '${t.relationName}', ${fieldsLiteral});
+      } catch (error) {
+        console.error('GraphQL error in update${modelName} mutation:', error);
+        throw error;
+      }
+    },`;
+  }
+
   const includeLogic = _buildInclude(metadata);
   const data = fkFields?.length ? `transform${modelName}InputToPrisma(input)` : 'input';
 
@@ -548,9 +822,20 @@ function _gqlFieldType(f: Field): string {
   return f.required ? `${scalar}!` : scalar;
 }
 
-function _buildObjectType(model: Model): string {
-  const fields = model.fields.map((f) => `  ${f.name}: ${_gqlFieldType(f)}`).join('\n');
-  return `type ${model.name} {\n${fields}\n}`;
+function _buildObjectType(model: Model, metadata: Record<string, EntityMetadata>): string {
+  const t = metadata[model.name]?.translation;
+  const fields = model.fields
+    // Drop this model's own translation relation (flattened below) and any relation to a
+    // `<Model>Translation` table from another model's side (e.g. `Language.creatureTranslations`)
+    // - it was never given its own GraphQL type to reference.
+    .filter((f) => !(t && f.isRelation && f.name === t.relationName) && !(f.isRelation && isTranslationModel(f.type, metadata)))
+    .map((f) => `  ${f.name}: ${_gqlFieldType(f)}`);
+  if (t) {
+    // Always nullable: the underlying `<Model>Translation` column may be NOT NULL, but a
+    // translation row for the requested `lang` may simply not exist (no fallback language).
+    for (const name of t.fields) fields.push(`  ${name}: String`);
+  }
+  return `type ${model.name} {\n${fields.join('\n')}\n}`;
 }
 
 function _buildListType(model: Model): string {
@@ -559,20 +844,27 @@ function _buildListType(model: Model): string {
 
 // Both Create and Update inputs stay fully optional: Prisma itself enforces
 // required-field/DB constraints on write, so the schema doesn't need to
-// duplicate that, and Update needs partial-field semantics anyway.
-function _buildInputType(model: Model, prefix: 'Create' | 'Update', skipInputFields: Set<string>): string {
+// duplicate that, and Update needs partial-field semantics anyway. `lang` is the one exception -
+// translation-table entities require it explicitly (see EntityMetadata.translation).
+function _buildInputType(model: Model, prefix: 'Create' | 'Update', skipInputFields: Set<string>, metadata?: EntityMetadata): string {
+  const t = metadata?.translation;
   const fields = model.fields
     .filter((f) => !f.isRelation && !skipInputFields.has(f.name))
-    .map((f) => `  ${f.name}: ${PRISMA_TO_GRAPHQL[f.type] ?? 'String'}`)
-    .join('\n');
-  return `input ${prefix}${model.name}Input {\n${fields}\n}`;
+    .map((f) => `  ${f.name}: ${PRISMA_TO_GRAPHQL[f.type] ?? 'String'}`);
+  if (t) {
+    fields.push(`  lang: String!`);
+    for (const name of t.fields) fields.push(`  ${name}: String`);
+  }
+  return `input ${prefix}${model.name}Input {\n${fields.join('\n')}\n}`;
 }
 
-function _buildQueryFields(modelNames: string[]): string {
+function _buildQueryFields(modelNames: string[], metadata: Record<string, EntityMetadata>, hasLocalization: boolean): string {
   return modelNames
     .map((name) => {
       const camel = toCamelCase(name);
-      return `  ${camel}(id: String!): ${name}\n  ${camel}List(filter: JSON, pagination: PaginationInput): ${name}List!`;
+      const t = metadata[name]?.translation;
+      const langArg = t ? ', lang: String!' : hasLocalization ? ', lang: String' : '';
+      return `  ${camel}(id: String!${langArg}): ${name}\n  ${camel}List(filter: JSON, pagination: PaginationInput${langArg}): ${name}List!`;
     })
     .join('\n');
 }
@@ -589,20 +881,29 @@ function _buildMutationFields(modelNames: string[]): string {
 export function generateGraphQLSchemaContent(
   models: Model[],
   metadata: Record<string, EntityMetadata>,
-  options: { skipInputFields?: string[] } = {},
+  options: { skipInputFields?: string[]; hasLocalization?: boolean; extend?: boolean } = {},
 ): string {
   const skipInputFields = options.skipInputFields ? new Set(options.skipInputFields) : DEFAULT_SKIP_INPUT_FIELDS;
+  const hasLocalization = options.hasLocalization ?? false;
+  const extend = options.extend ?? false;
   // Only entities present in `metadata` get resolvers generated (see
   // inferEntityMetadata), so only those get Query/Mutation/List/Input types.
-  const operableModels = models.filter((m) => metadata[m.name]);
+  // `<Model>Translation` tables are excluded entirely - never a first-class entity.
+  const visibleModels = models.filter((m) => !isTranslationModel(m.name, metadata));
+  const operableModels = visibleModels.filter((m) => metadata[m.name]);
   const operableNames = operableModels.map((m) => m.name);
 
-  const objectTypes = models.map(_buildObjectType).join('\n\n');
-  const listTypes = operableModels.map(_buildListType).join('\n\n');
-  const createInputs = operableModels.map((m) => _buildInputType(m, 'Create', skipInputFields)).join('\n\n');
-  const updateInputs = operableModels.map((m) => _buildInputType(m, 'Update', skipInputFields)).join('\n\n');
+  const objectTypes = visibleModels.map((m) => _buildObjectType(m, metadata)).join('\n\n');
+  const listTypes = operableModels.map((m) => _buildListType(m)).join('\n\n');
+  const createInputs = operableModels.map((m) => _buildInputType(m, 'Create', skipInputFields, metadata[m.name])).join('\n\n');
+  const updateInputs = operableModels.map((m) => _buildInputType(m, 'Update', skipInputFields, metadata[m.name])).join('\n\n');
 
-  const sdl = `scalar JSON
+  // In `extend` mode, `scalar`/`PaginationInput`/`Query`/`Mutation` are assumed to already be
+  // declared by a base schema fragment loaded first (this generator has no opinion on what that
+  // fragment contains beyond those names) - only the entity-specific types/operations are emitted.
+  const preamble = extend
+    ? ''
+    : `scalar JSON
 scalar DateTime
 
 input PaginationInput {
@@ -610,7 +911,11 @@ input PaginationInput {
   offset: Int
 }
 
-${objectTypes}
+`;
+  const queryType = extend ? `extend type Query {\n${_buildQueryFields(operableNames, metadata, hasLocalization)}\n}` : `type Query {\n${_buildQueryFields(operableNames, metadata, hasLocalization)}\n}`;
+  const mutationType = extend ? `extend type Mutation {\n${_buildMutationFields(operableNames)}\n}` : `type Mutation {\n${_buildMutationFields(operableNames)}\n}`;
+
+  const sdl = `${preamble}${objectTypes}
 
 ${listTypes}
 
@@ -618,13 +923,9 @@ ${createInputs}
 
 ${updateInputs}
 
-type Query {
-${_buildQueryFields(operableNames)}
-}
+${queryType}
 
-type Mutation {
-${_buildMutationFields(operableNames)}
-}`;
+${mutationType}`;
 
   return `/**
  * GraphQL Schema - Auto-generated
@@ -645,25 +946,97 @@ export function generateRestHandlerContent(
   config: RestHandlerConfig,
 ): string {
   const camelCase = toCamelCase(modelName);
-  const filterLogic = _buildFilterLogicREST(metadata);
   const orderBy = metadata.orderBy;
   if (!orderBy) {
     throw new Error(`Missing orderBy in metadata for "${modelName}"`);
   }
-  const { localization } = config;
+  const { localization, caseInsensitiveSearch = true } = config;
+  const filterLogic = _buildFilterLogicREST(modelName, metadata, localization, caseInsensitiveSearch);
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
+  const t = metadata.translation;
 
   const localizationImport = localization ? `import { ${localizeExport} } from '${localization.localizeImport}';\n` : '';
-  const listSignature = localization ? `list${modelName}s(req: Request, lang?: string)` : `list${modelName}s(req: Request)`;
-  const localizeList = localization
-    ? `\n    const localizedData = lang\n      ? await Promise.all(data.map((item: any) => ${localizeExport}(item, '${modelName}', lang)))\n      : data;`
+
+  const listSignature = t
+    ? `list${modelName}s(req: Request, lang: string)`
+    : localization
+      ? `list${modelName}s(req: Request, lang?: string)`
+      : `list${modelName}s(req: Request)`;
+  const listGuard = t ? `\n    if (!lang) return jsonError(400, "'lang' is required to fetch ${modelName}s");` : '';
+  const listInclude = t ? `\n        include: { ${t.relationName}: { where: { languageCode: lang } } },` : '';
+  const localizeList = t
+    ? `\n    const localizedData = data.map((item: any) => flattenTranslation(item, '${t.relationName}', ${JSON.stringify(t.fields)}));`
+    : localization
+      ? `\n    const localizedData = lang\n      ? await Promise.all(data.map((item: any) => ${localizeExport}(item, '${modelName}', lang)))\n      : data;`
+      : '';
+  const listData = t || localization ? 'localizedData' : 'data';
+
+  const getSignature = t
+    ? `get${modelName}(id: string, lang: string)`
+    : localization
+      ? `get${modelName}(id: string, lang?: string)`
+      : `get${modelName}(id: string)`;
+  const getGuard = t ? `\n    if (!lang) return jsonError(400, "'lang' is required to fetch a ${modelName}");` : '';
+  const getInclude = t ? `,\n      include: { ${t.relationName}: { where: { languageCode: lang } } }` : '';
+  const localizeGet = t
+    ? `\n    const localizedData = flattenTranslation(data, '${t.relationName}', ${JSON.stringify(t.fields)});`
+    : localization
+      ? `\n    const localizedData = lang ? await ${localizeExport}(data, '${modelName}', lang) : data;`
+      : '';
+  const getData = t || localization ? 'localizedData' : 'data';
+
+  const createLogic = t
+    ? `    const { lang, ${t.fields.join(', ')}, ...baseInput } = input as any;
+    if (!lang) return jsonError(400, "'lang' is required to create a ${modelName}");
+    const idError = validateInputIDs(baseInput);
+    if (idError) return jsonError(400, idError);
+    const created = await (prisma as any).${camelCase}.create({
+      data: {
+        ...baseInput,
+        ${t.relationName}: { create: { languageCode: lang, ${t.fields.join(', ')} } },
+      },
+      include: { ${t.relationName}: { where: { languageCode: lang } } },
+    });
+    const data = flattenTranslation(created, '${t.relationName}', ${JSON.stringify(t.fields)});`
+    : `    const idError = validateInputIDs(input);
+    if (idError) return jsonError(400, idError);
+    const data = await (prisma as any).${camelCase}.create({ data: input });`;
+
+  const updateLogic = t
+    ? `    const { lang, ${t.fields.join(', ')}, ...baseInput } = input as any;
+    if (!lang) return jsonError(400, "'lang' is required to update a ${modelName}");
+    const idError = validateInputIDs(baseInput);
+    if (idError) return jsonError(400, idError);
+    const updated = await (prisma as any).${camelCase}.update({
+      where: { id },
+      data: {
+        ...baseInput,
+        ${t.relationName}: {
+          upsert: {
+            where: { ${t.fkFieldName}_languageCode: { ${t.fkFieldName}: id, languageCode: lang } },
+            create: { languageCode: lang, ${t.fields.join(', ')} },
+            update: { ${t.fields.join(', ')} },
+          },
+        },
+      },
+      include: { ${t.relationName}: { where: { languageCode: lang } } },
+    });
+    const data = flattenTranslation(updated, '${t.relationName}', ${JSON.stringify(t.fields)});`
+    : `    const idError = validateInputIDs(input);
+    if (idError) return jsonError(400, idError);
+    const data = await (prisma as any).${camelCase}.update({ where: { id }, data: input });`;
+
+  const flattenTranslationFn = t
+    ? `
+function flattenTranslation(entity: any, relationName: string, fields: string[]): any {
+  if (!entity) return entity;
+  const { [relationName]: translations, ...rest } = entity;
+  const t = Array.isArray(translations) ? translations[0] : undefined;
+  for (const f of fields) rest[f] = t ? (t[f] ?? null) : null;
+  return rest;
+}
+`
     : '';
-  const listData = localization ? 'localizedData' : 'data';
-  const getSignature = localization ? `get${modelName}(id: string, lang?: string)` : `get${modelName}(id: string)`;
-  const localizeGet = localization
-    ? `\n    const localizedData = lang ? await ${localizeExport}(data, '${modelName}', lang) : data;`
-    : '';
-  const getData = localization ? 'localizedData' : 'data';
 
   return `/**
  * ${modelName} REST API Handlers
@@ -687,9 +1060,9 @@ function validateInputIDs(input: any): string | null {
   }
   return null;
 }
-
+${flattenTranslationFn}
 export async function ${listSignature}: Promise<Response> {
-  try {
+  try {${listGuard}
     const url = new URL(req.url);
 
     const limitParam = url.searchParams.get('limit');
@@ -715,7 +1088,7 @@ export async function ${listSignature}: Promise<Response> {
         where,
         take: limit,
         skip: offset,
-        orderBy: { ${orderBy}: 'asc' },
+        orderBy: { ${orderBy}: 'asc' },${listInclude}
       }),
       (prisma as any).${camelCase}.count({ where }),
     ]);
@@ -730,9 +1103,9 @@ ${localizeList}
 }
 
 export async function ${getSignature}: Promise<Response> {
-  try {
+  try {${getGuard}
     if (!isValidUUID(id)) return jsonError(400, 'Invalid ID format - must be a valid UUID');
-    const data = await (prisma as any).${camelCase}.findUnique({ where: { id } });
+    const data = await (prisma as any).${camelCase}.findUnique({ where: { id }${getInclude} });
     if (!data) return jsonError(404, '${modelName} not found');
 ${localizeGet}
     return new Response(JSON.stringify(${getData}), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -744,9 +1117,7 @@ ${localizeGet}
 export async function create${modelName}(req: Request): Promise<Response> {
   try {
     const input = await req.json();
-    const idError = validateInputIDs(input);
-    if (idError) return jsonError(400, idError);
-    const data = await (prisma as any).${camelCase}.create({ data: input });
+${createLogic}
     return new Response(JSON.stringify(data), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(400, (error as Error).message);
@@ -757,9 +1128,7 @@ export async function update${modelName}(id: string, req: Request): Promise<Resp
   try {
     if (!isValidUUID(id)) return jsonError(400, 'Invalid ID format - must be a valid UUID');
     const input = await req.json();
-    const idError = validateInputIDs(input);
-    if (idError) return jsonError(400, idError);
-    const data = await (prisma as any).${camelCase}.update({ where: { id }, data: input });
+${updateLogic}
     return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(400, (error as Error).message);
@@ -785,27 +1154,62 @@ function jsonError(status: number, error: string, details?: unknown): Response {
 `;
 }
 
-function _buildFilterLogicREST(metadata: EntityMetadata): string {
-  if (!metadata.filterable && !metadata.searchableFields?.length) return 'const where: any = {};';
+function _buildFilterLogicREST(
+  modelName: string,
+  metadata: EntityMetadata,
+  localization?: LocalizationConfig,
+  caseInsensitiveSearch = true,
+): string {
+  const t = metadata.translation;
+  const hasSearch = (metadata.searchableFields?.length ?? 0) > 0 || !!t;
+  if (!metadata.filterable && !hasSearch) return 'const where: any = {};';
+
+  // See the matching comment in _buildFilterLogicGQL - same reasoning, REST twin.
+  const modeSuffix = caseInsensitiveSearch ? ", mode: 'insensitive'" : '';
 
   let code =
     "const where: any = {};\n\n    const filterPrefix = 'filter.';\n    url.searchParams.forEach((value, key) => {\n      if (!key.startsWith(filterPrefix)) return;\n      const field = key.slice(filterPrefix.length);\n";
 
   for (const [field, mode] of Object.entries(metadata.filterable ?? {})) {
     if (mode === 'contains') {
-      code += `      if (field === '${field}') where['${field}'] = { contains: value, mode: 'insensitive' };\n`;
+      code += `      if (field === '${field}') where['${field}'] = { contains: value${modeSuffix} };\n`;
     } else {
       code += `      if (field === '${field}') where['${field}'] = value;\n`;
     }
   }
   code += '    });\n';
 
-  if (metadata.searchableFields?.length) {
-    code += `\n    const search = url.searchParams.get('search');\n    if (search) {\n      where.OR = [\n`;
-    for (const field of metadata.searchableFields) {
-      code += `        { ${field}: { contains: search, mode: 'insensitive' } },\n`;
+  if (hasSearch) {
+    code += `\n    const search = url.searchParams.get('search');\n    if (search) {`;
+    if (t) {
+      // Relational filter against the dedicated `<Model>Translation` table - see the matching
+      // comment in _buildFilterLogicGQL. Not scoped by `languageCode` (cross-language search).
+      code += `\n      where.OR = [\n`;
+      for (const field of metadata.searchableFields ?? []) {
+        code += `        { ${field}: { contains: search${modeSuffix} } },\n`;
+      }
+      const searchFields = t.searchableFields?.length ? t.searchableFields : t.fields;
+      const orClauses = searchFields.map((f) => `{ ${f}: { contains: search${modeSuffix} } }`).join(', ');
+      code += `        { ${t.relationName}: { some: { OR: [${orClauses}] } } },\n`;
+      code += '      ];';
+    } else {
+      // Gated on `localization` for the same reason: only projects with that config are
+      // guaranteed to have a `Translation` model at all.
+      if (localization) {
+        // See the matching comment in _buildFilterLogicGQL - same reasoning, REST twin.
+        const fieldList = metadata.searchableFields!.map((f) => `'${f}'`).join(', ');
+        code += `\n      const translationMatches = await prisma.translation.findMany({\n        where: { entityType: '${modelName}', fieldName: { in: [${fieldList}] }, value: { contains: search${modeSuffix} } },\n        select: { entityId: true },\n      });`;
+      }
+      code += `\n      where.OR = [\n`;
+      for (const field of metadata.searchableFields ?? []) {
+        code += `        { ${field}: { contains: search${modeSuffix} } },\n`;
+      }
+      code += '      ];';
+      if (localization) {
+        code += `\n      if (translationMatches.length) where.OR.push({ id: { in: translationMatches.map((t: any) => t.entityId) } });`;
+      }
     }
-    code += '      ];\n    }';
+    code += '\n    }';
   }
 
   return code;
@@ -843,7 +1247,12 @@ export function generateRestRouterContent(models: Model[], config: RestRouterCon
     })
     .join('\n\n');
 
-  const langDeclaration = localization ? `\n    const lang = ${getLangExport}(req);` : '';
+  // getLangExport's consumer implementation may be sync or async (the generator has no way to
+  // know) - `await` is always safe here regardless (a no-op on a non-Promise value), and the
+  // surrounding handleRestRequest is already async. Without it, an async implementation (the
+  // common case - deriving language from Accept-Language often means a DB lookup for supported
+  // languages) leaves `lang` as an unresolved Promise, silently breaking every localized read.
+  const langDeclaration = localization ? `\n    const lang = await ${getLangExport}(req);` : '';
 
   return `/**
  * REST API Router - Auto-generated

@@ -148,6 +148,10 @@ describe('generateGraphQLResolversContent', () => {
       expect(output).toContain('updateAuthor:');
       expect(output).toContain('deleteAuthor:');
     });
+
+    it('does not search a Translation table (no localization config, no guaranteed Translation model)', () => {
+      expect(output).not.toContain('prisma.translation');
+    });
   });
 
   describe('with localization', () => {
@@ -171,6 +175,55 @@ describe('generateGraphQLResolversContent', () => {
 
     it('adds lang parameter to single resolver args', () => {
       expect(output).toContain("{ id, lang }: { id: string; lang?: string }");
+    });
+
+    it('list resolver searches Translation for this model type, in addition to base columns', () => {
+      const authorListBlock = output.slice(output.indexOf('authorList:'), output.indexOf('createAuthor:'));
+      expect(authorListBlock).toContain("entityType: 'Author'");
+      expect(authorListBlock).toContain('await prisma.translation.findMany');
+      expect(authorListBlock).toContain('{ name: { contains: filter.search, mode: \'insensitive\' } }');
+      expect(authorListBlock).toContain('where.OR.push({ id: { in: translationMatches.map((t: any) => t.entityId) } })');
+    });
+
+    it('scopes the Translation lookup to the same fields searched in the base columns', () => {
+      // Not every Translation row for this entity type - otherwise a match buried in a
+      // non-searchable field's translation (e.g. `details`) would surface a result that the same
+      // text in the base language never would, since base-column search only covers
+      // searchableFields.
+      const authorListBlock = output.slice(output.indexOf('authorList:'), output.indexOf('createAuthor:'));
+      expect(authorListBlock).toContain("fieldName: { in: ['name'] }");
+    });
+
+    it('does not gate the translation search on a per-entity registration check', () => {
+      // Every model with searchableFields gets the Translation lookup when localization is
+      // configured - the generator has no DB access at generation time to know which entity
+      // types are actually registered for translation.
+      const categoryListBlock = output.slice(output.indexOf('categoryList:'), output.indexOf('createCategory:'));
+      expect(categoryListBlock).toContain("entityType: 'Category'");
+    });
+  });
+
+  describe('caseInsensitiveSearch: false (MySQL/SQLite - mode is not a valid StringFilter option)', () => {
+    const output = generateGraphQLResolversContent(graphqlMetadata, dmmfModels, {
+      prismaClientPath: PRISMA_PATH,
+      contextTypePath: CONTEXT_PATH,
+      localization: { localizeImport: '../localization/localization.entity' },
+      caseInsensitiveSearch: false,
+    });
+
+    it('omits mode from per-field filterable contains checks', () => {
+      expect(output).not.toContain("mode: 'insensitive'");
+    });
+
+    it('omits mode from the searchableFields OR block', () => {
+      const authorListBlock = output.slice(output.indexOf('authorList:'), output.indexOf('createAuthor:'));
+      expect(authorListBlock).toContain('{ name: { contains: filter.search } }');
+    });
+
+    it('omits mode from the Translation lookup, but still emits it', () => {
+      const authorListBlock = output.slice(output.indexOf('authorList:'), output.indexOf('createAuthor:'));
+      expect(authorListBlock).toContain("value: { contains: filter.search } }");
+      expect(authorListBlock).toContain('await prisma.translation.findMany');
     });
   });
 
@@ -314,6 +367,10 @@ describe('generateRestHandlerContent', () => {
       expect(output).toContain('export async function updateAuthor(');
       expect(output).toContain('export async function deleteAuthor(');
     });
+
+    it('does not search a Translation table (no localization config, no guaranteed Translation model)', () => {
+      expect(output).not.toContain('prisma.translation');
+    });
   });
 
   describe('with localization', () => {
@@ -336,6 +393,36 @@ describe('generateRestHandlerContent', () => {
 
     it('calls localizeEntity with 3 args in get', () => {
       expect(output).toContain("localizeEntity(data, 'Author', lang)");
+    });
+
+    it('list handler searches Translation for this model type, in addition to base columns', () => {
+      const listBlock = output.slice(output.indexOf('listAuthors'), output.indexOf('getAuthor'));
+      expect(listBlock).toContain("entityType: 'Author'");
+      expect(listBlock).toContain('await prisma.translation.findMany');
+      expect(listBlock).toContain("{ name: { contains: search, mode: 'insensitive' } }");
+      expect(listBlock).toContain("{ title: { contains: search, mode: 'insensitive' } }");
+      expect(listBlock).toContain('where.OR.push({ id: { in: translationMatches.map((t: any) => t.entityId) } })');
+    });
+
+    it('scopes the Translation lookup to the same fields searched in the base columns', () => {
+      const listBlock = output.slice(output.indexOf('listAuthors'), output.indexOf('getAuthor'));
+      expect(listBlock).toContain("fieldName: { in: ['name', 'title'] }");
+    });
+  });
+
+  describe('caseInsensitiveSearch: false (MySQL/SQLite)', () => {
+    const output = generateRestHandlerContent('Author', handlerMetadata, {
+      prismaClientPath: REST_PRISMA_PATH,
+      localization: { localizeImport: '../../core/localization/localization.entity' },
+      caseInsensitiveSearch: false,
+    });
+
+    it('omits mode everywhere, including the Translation lookup', () => {
+      expect(output).not.toContain("mode: 'insensitive'");
+      const listBlock = output.slice(output.indexOf('listAuthors'), output.indexOf('getAuthor'));
+      expect(listBlock).toContain('{ name: { contains: search } }');
+      expect(listBlock).toContain('value: { contains: search } }');
+      expect(listBlock).toContain('await prisma.translation.findMany');
     });
   });
 
@@ -408,8 +495,8 @@ describe('generateRestRouterContent', () => {
       expect(output).toContain("import { getLanguageFromRequest } from '../localization/localization.utils'");
     });
 
-    it('extracts lang once before the dispatch block', () => {
-      expect(output).toContain('const lang = getLanguageFromRequest(req)');
+    it('extracts lang once before the dispatch block, awaiting it (the consumer impl may be async)', () => {
+      expect(output).toContain('const lang = await getLanguageFromRequest(req)');
       const count = (output.match(/getLanguageFromRequest\(req\)/g) ?? []).length;
       expect(count).toBe(1);
     });
@@ -440,7 +527,7 @@ describe('generateRestRouterContent', () => {
 
     it('uses the custom export name', () => {
       expect(output).toContain("import { extractLang } from './lang'");
-      expect(output).toContain('const lang = extractLang(req)');
+      expect(output).toContain('const lang = await extractLang(req)');
     });
   });
 
@@ -461,5 +548,245 @@ describe('generateRestRouterContent', () => {
       const entityPos = output.indexOf("entity === 'authors'");
       expect(extraPos).toBeLessThan(entityPos);
     });
+  });
+});
+
+// ── Per-entity translation tables (detectTranslationRelations + downstream codegen) ────────────
+
+const translationDmmfModels: DMMFModel[] = [
+  {
+    name: 'Book',
+    dbName: null,
+    fields: [
+      { name: 'id', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true },
+      { name: 'name', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      {
+        name: 'translations',
+        kind: 'object',
+        type: 'BookTranslation',
+        isRequired: false,
+        isList: true,
+        isId: false,
+        relationName: 'BookToBookTranslation',
+        relationFromFields: [],
+        relationToFields: [],
+      },
+    ],
+  },
+  {
+    name: 'BookTranslation',
+    dbName: null,
+    fields: [
+      { name: 'id', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true },
+      { name: 'bookId', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      { name: 'languageCode', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      { name: 'title', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      { name: 'summary', kind: 'scalar', type: 'String', isRequired: false, isList: false, isId: false },
+      {
+        name: 'book',
+        kind: 'object',
+        type: 'Book',
+        isRequired: true,
+        isList: false,
+        isId: false,
+        relationName: 'BookToBookTranslation',
+        relationFromFields: ['bookId'],
+        relationToFields: ['id'],
+      },
+    ],
+  },
+];
+
+const translationMetadata = inferEntityMetadata(translationDmmfModels, { searchableFieldPatterns: [/name/i] });
+
+describe('inferEntityMetadata - translation-table detection', () => {
+  it('detects the translation relation on the parent model', () => {
+    expect(translationMetadata.Book?.translation).toEqual({
+      relationName: 'translations',
+      translationModelName: 'BookTranslation',
+      fkFieldName: 'bookId',
+      fields: ['title', 'summary'],
+      // searchableFieldPatterns: [/name/i] matches neither 'title' nor 'summary' - see the
+      // 'falls back to every translation field' test below for the resulting search behavior.
+      searchableFields: [],
+    });
+  });
+
+  it('excludes the translation model from metadata entirely - never a first-class entity', () => {
+    expect(translationMetadata.BookTranslation).toBeUndefined();
+  });
+
+  it('does not list the translation relation as a flat includeRelations entry', () => {
+    expect(translationMetadata.Book?.includeRelations ?? []).not.toContain('translations');
+  });
+
+  it('does not detect a translation relation for a same-named-but-unrelated model', () => {
+    const unrelated: DMMFModel[] = [
+      { name: 'Widget', dbName: null, fields: [{ name: 'id', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true }] },
+      { name: 'WidgetTranslation', dbName: null, fields: [{ name: 'id', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true }] },
+    ];
+    const meta = inferEntityMetadata(unrelated);
+    expect(meta.Widget?.translation).toBeUndefined();
+  });
+});
+
+describe('generateGraphQLResolversContent - translation-table entities', () => {
+  const output = generateGraphQLResolversContent(translationMetadata, translationDmmfModels, {
+    prismaClientPath: PRISMA_PATH,
+    contextTypePath: CONTEXT_PATH,
+  });
+
+  it('requires lang (non-optional) on single and list resolver signatures', () => {
+    expect(output).toContain('{ id, lang }: { id: string; lang: string }');
+    expect(output).toContain('{ filter, pagination, lang }: { filter?: any; pagination?: any; lang: string }');
+    expect(output).toContain("if (!lang) throw new Error(\"'lang' is required to fetch a Book\");");
+  });
+
+  it('scopes the include to the requested language', () => {
+    expect(output).toContain('translations: { where: { languageCode: lang } },');
+  });
+
+  it('flattens the translation row via a whitelisted flattenTranslation helper', () => {
+    expect(output).toContain('function flattenTranslation(entity: any, relationName: string, fields: string[]): any {');
+    expect(output).toContain('return data ? flattenTranslation(data, \'translations\', ["title","summary"]) : null;');
+    expect(output).toContain("data.map((item: any) => flattenTranslation(item, 'translations', [\"title\",\"summary\"]))");
+  });
+
+  it('never calls localizeEntity for a translation-table entity', () => {
+    expect(output).not.toContain('localizeEntity');
+  });
+
+  it('search matches across all languages via a relational filter, not scoped to lang', () => {
+    // The exact OR-clause text below proves it, since it has no `languageCode` filter inside the
+    // `some: {...}` - the surrounding resolver legitimately says `languageCode: lang` elsewhere,
+    // in the *fetch* `include` (which scopes the returned translation row, not the search match).
+    const bookListBlock = output.slice(output.indexOf('bookList:'), output.indexOf('createBook:'));
+    expect(bookListBlock).toContain(
+      "{ translations: { some: { OR: [{ title: { contains: filter.search, mode: 'insensitive' } }, { summary: { contains: filter.search, mode: 'insensitive' } }] } } }",
+    );
+    expect(bookListBlock).not.toContain('prisma.translation.findMany');
+  });
+
+  it('create destructures lang and translatable fields, writing a nested translation row', () => {
+    const createBlock = output.slice(output.indexOf('createBook:'), output.indexOf('updateBook:'));
+    expect(createBlock).toContain('const { lang, title, summary, ...baseInput } = input;');
+    expect(createBlock).toContain('translations: { create: { languageCode: lang, title, summary } },');
+  });
+
+  it('update upserts the translation row on the fk_languageCode compound unique', () => {
+    const updateBlock = output.slice(output.indexOf('updateBook:'), output.indexOf('deleteBook:'));
+    expect(updateBlock).toContain('where: { bookId_languageCode: { bookId: id, languageCode: lang } },');
+    expect(updateBlock).toContain('create: { languageCode: lang, title, summary },');
+    expect(updateBlock).toContain('update: { title, summary },');
+  });
+});
+
+describe('generateGraphQLSchemaContent - translation-table entities', () => {
+  const models = parsePrismaModels(translationDmmfModels);
+  const output = generateGraphQLSchemaContent(models, translationMetadata, { hasLocalization: true });
+
+  it('excludes the translation model from object types entirely', () => {
+    expect(output).not.toContain('type BookTranslation');
+  });
+
+  it('flattens translatable fields onto the parent type, always nullable, drops the raw relation', () => {
+    const bookType = output.slice(output.indexOf('type Book {'), output.indexOf('type BookList'));
+    expect(bookType).toContain('title: String\n');
+    expect(bookType).not.toContain('title: String!');
+    expect(bookType).not.toContain('translations:');
+  });
+
+  it('requires lang on query fields for translation-table entities', () => {
+    expect(output).toContain('book(id: String!, lang: String!): Book');
+    expect(output).toContain('bookList(filter: JSON, pagination: PaginationInput, lang: String!): BookList!');
+  });
+
+  it('adds lang and translatable fields to Create/Update inputs', () => {
+    const createInput = output.slice(output.indexOf('input CreateBookInput {'), output.indexOf('input UpdateBookInput'));
+    expect(createInput).toContain('lang: String!');
+    expect(createInput).toContain('title: String');
+    expect(createInput).toContain('summary: String');
+  });
+});
+
+describe('generateRestHandlerContent - translation-table entities', () => {
+  const output = generateRestHandlerContent('Book', translationMetadata.Book!, { prismaClientPath: REST_PRISMA_PATH });
+
+  it('requires lang (non-optional) on list and get signatures', () => {
+    expect(output).toContain('listBooks(req: Request, lang: string)');
+    expect(output).toContain('getBook(id: string, lang: string)');
+    expect(output).toContain("if (!lang) return jsonError(400, \"'lang' is required to fetch Books\");");
+  });
+
+  it('scopes the include to the requested language and flattens the result', () => {
+    expect(output).toContain('include: { translations: { where: { languageCode: lang } } }');
+    expect(output).toContain("flattenTranslation(item, 'translations', [\"title\",\"summary\"])");
+  });
+
+  it('search matches across all languages via a relational filter', () => {
+    expect(output).toContain(
+      "{ translations: { some: { OR: [{ title: { contains: search, mode: 'insensitive' } }, { summary: { contains: search, mode: 'insensitive' } }] } } }",
+    );
+  });
+
+  it('create/update write a nested translation row via upsert on the compound unique key', () => {
+    expect(output).toContain('translations: { create: { languageCode: lang, title, summary } },');
+    expect(output).toContain('where: { bookId_languageCode: { bookId: id, languageCode: lang } },');
+  });
+});
+
+describe('translation-table search - scoped by searchableFieldPatterns', () => {
+  // Regression coverage for a real bug: filter.search matched every translation field
+  // unconditionally (including long-form fields like `details`), so searching for a word that
+  // only appeared buried in an unrelated item's flavor text returned that item. Base-column
+  // search was already scoped by searchableFieldPatterns; translation-table search needs the same
+  // scoping, not just whatever fields happen to be marked translatable.
+  const scopedMetadata = inferEntityMetadata(translationDmmfModels, { searchableFieldPatterns: [/title/i] });
+
+  it('narrows the translation model fields used, not just the base-column ones', () => {
+    expect(scopedMetadata.Book?.translation?.searchableFields).toEqual(['title']);
+  });
+
+  it('GraphQL: only searches the scoped field, not every translatable field', () => {
+    const output = generateGraphQLResolversContent(scopedMetadata, translationDmmfModels, {
+      prismaClientPath: PRISMA_PATH,
+      contextTypePath: CONTEXT_PATH,
+    });
+    const bookListBlock = output.slice(output.indexOf('bookList:'), output.indexOf('createBook:'));
+    expect(bookListBlock).toContain(
+      "{ translations: { some: { OR: [{ title: { contains: filter.search, mode: 'insensitive' } }] } } }",
+    );
+    expect(bookListBlock).not.toContain('summary: { contains: filter.search');
+  });
+
+  it('REST: only searches the scoped field, not every translatable field', () => {
+    const output = generateRestHandlerContent('Book', scopedMetadata.Book!, { prismaClientPath: REST_PRISMA_PATH });
+    expect(output).toContain(
+      "{ translations: { some: { OR: [{ title: { contains: search, mode: 'insensitive' } }] } } }",
+    );
+    expect(output).not.toContain('summary: { contains: search');
+  });
+
+  it('falls back to every translation field when none match the configured patterns', () => {
+    // e.g. searchableFieldPatterns: [/name/i] against a translation model with only title/summary
+    // - no pattern match, but search should still work rather than silently searching nothing.
+    const noMatchMetadata = inferEntityMetadata(translationDmmfModels, { searchableFieldPatterns: [/name/i] });
+    expect(noMatchMetadata.Book?.translation?.searchableFields).toEqual([]);
+    const output = generateGraphQLResolversContent(noMatchMetadata, translationDmmfModels, {
+      prismaClientPath: PRISMA_PATH,
+      contextTypePath: CONTEXT_PATH,
+    });
+    const bookListBlock = output.slice(output.indexOf('bookList:'), output.indexOf('createBook:'));
+    expect(bookListBlock).toContain('title: { contains: filter.search');
+    expect(bookListBlock).toContain('summary: { contains: filter.search');
+  });
+
+  it('create/update still write every translation field regardless of search scoping', () => {
+    const output = generateGraphQLResolversContent(scopedMetadata, translationDmmfModels, {
+      prismaClientPath: PRISMA_PATH,
+      contextTypePath: CONTEXT_PATH,
+    });
+    const createBlock = output.slice(output.indexOf('createBook:'), output.indexOf('updateBook:'));
+    expect(createBlock).toContain('translations: { create: { languageCode: lang, title, summary } },');
   });
 });

@@ -224,7 +224,8 @@ export function generateGraphQLClientContent(
   allEntities: EntityMeta[],
   config: GraphQLClientConfig,
 ): string {
-  const { graphqlRequestImport, graphqlRequestExport = 'graphqlRequest', apiTypesImport } = config;
+  const { graphqlRequestImport, graphqlRequestExport = 'graphqlRequest', apiTypesImport, language } = config;
+  const languageExport = language?.languageExport ?? 'getLanguage';
 
   const entityByName = new Map(allEntities.map((e) => [e.name, e]));
 
@@ -241,40 +242,66 @@ export function generateGraphQLClientContent(
     })
     .join('\n');
 
+  const languageImportLine = language ? `import { ${languageExport} } from '${language.languageImport}';\n` : '';
+
+  // A translation-table entity (EntityMeta.requiresLang) has no fallback language, so its
+  // server-side `lang` argument is non-null (`String!`) - sending the usual nullable `$lang:
+  // String` variable in that argument position would be a GraphQL validation error. Every other
+  // localized entity keeps the existing optional `$lang: String`.
+  const langGqlType = entity.requiresLang ? 'String!' : 'String';
+
+  // langOverride lets a caller request a *specific* language regardless of the current UI
+  // language - e.g. fetching a small lookup table in every supported language at once to
+  // build a language-agnostic client-side search. Defaults to the live current-language
+  // accessor, matching every call site that doesn't need an override.
+  const getFnArgs = language ? 'id: string, langOverride?: string' : 'id: string';
+  const getQueryVars = language ? `$id: String!, $lang: ${langGqlType}` : '$id: String!';
+  const getFieldArgs = language ? 'id: $id, lang: $lang' : 'id: $id';
+  const getVariables = language ? `{ id, lang: langOverride ?? ${languageExport}() }` : '{ id }';
+
+  const listFnArgs = language
+    ? 'filter?: any, pagination?: PaginationInput, langOverride?: string'
+    : 'filter?: any, pagination?: PaginationInput';
+  const listQueryVars = language
+    ? `$filter: JSON, $pagination: PaginationInput, $lang: ${langGqlType}`
+    : '$filter: JSON, $pagination: PaginationInput';
+  const listFieldArgs = language ? 'filter: $filter, pagination: $pagination, lang: $lang' : 'filter: $filter, pagination: $pagination';
+  const listVariables = language ? `{ filter, pagination, lang: langOverride ?? ${languageExport}() }` : '{ filter, pagination }';
+
   return `/**
  * ${entity.displayName} Client — auto-generated, do not edit
  */
 
 import { ${graphqlRequestExport} } from '${graphqlRequestImport}';
-import type { ApiList, PaginationInput } from '${apiTypesImport}';
+${languageImportLine}import type { ApiList, PaginationInput } from '${apiTypesImport}';
 import type { ${entity.name} } from './${entity.kebab}.types.auto';
 
-export async function fetch${entity.name}(id: string): Promise<${entity.name} | null> {
+export async function fetch${entity.name}(${getFnArgs}): Promise<${entity.name} | null> {
   const data = await ${graphqlRequestExport}<{ ${entity.camel}: ${entity.name} | null }>(\`
-    query Get${entity.name}($id: String!) {
-      ${entity.camel}(id: $id) {
+    query Get${entity.name}(${getQueryVars}) {
+      ${entity.camel}(${getFieldArgs}) {
 ${allFields}
       }
     }
-  \`, { id });
+  \`, ${getVariables});
   return data.${entity.camel};
 }
 
-export async function fetch${entity.name}List(filter?: any, pagination?: PaginationInput): Promise<ApiList<${entity.name}>> {
+export async function fetch${entity.name}List(${listFnArgs}): Promise<ApiList<${entity.name}>> {
   const data = await ${graphqlRequestExport}<{ ${entity.camel}List: ApiList<${entity.name}> }>(\`
-    query Get${entity.name}List($filter: JSON, $pagination: PaginationInput) {
-      ${entity.camel}List(filter: $filter, pagination: $pagination) {
+    query Get${entity.name}List(${listQueryVars}) {
+      ${entity.camel}List(${listFieldArgs}) {
         data {
 ${allFields}
         }
         total
       }
     }
-  \`, { filter, pagination });
+  \`, ${listVariables});
   return data.${entity.camel}List;
 }
 
-export async function create${entity.name}(input: Partial<${entity.name}>): Promise<${entity.name}> {
+export async function create${entity.name}(input: Partial<${entity.name}>${entity.requiresLang ? ' & { lang: string }' : ''}): Promise<${entity.name}> {
   const data = await ${graphqlRequestExport}<{ create${entity.name}: ${entity.name} }>(\`
     mutation Create${entity.name}($input: Create${entity.name}Input!) {
       create${entity.name}(input: $input) { id }
@@ -283,7 +310,7 @@ export async function create${entity.name}(input: Partial<${entity.name}>): Prom
   return data.create${entity.name};
 }
 
-export async function update${entity.name}(id: string, input: Partial<${entity.name}>): Promise<${entity.name}> {
+export async function update${entity.name}(id: string, input: Partial<${entity.name}>${entity.requiresLang ? ' & { lang: string }' : ''}): Promise<${entity.name}> {
   const data = await ${graphqlRequestExport}<{ update${entity.name}: ${entity.name} }>(\`
     mutation Update${entity.name}($id: String!, $input: Update${entity.name}Input!) {
       update${entity.name}(id: $id, input: $input) { id }

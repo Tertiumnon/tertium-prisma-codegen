@@ -395,6 +395,117 @@ describe('generateGraphQLClientContent', () => {
 
     expect(output).toContain('External {\n          id\n        }');
   });
+
+  describe('without language config', () => {
+    const output = generateGraphQLClientContent(userEntity, [userEntity], {
+      graphqlRequestImport: '../../graphql',
+      apiTypesImport: '../../types',
+    });
+
+    it('does not add a lang argument or import anything language-related', () => {
+      expect(output).not.toContain('$lang');
+      expect(output).not.toContain('getLanguage');
+      expect(output).not.toContain('langOverride');
+    });
+
+    it('query signatures have no lang parameter', () => {
+      expect(output).toContain('query GetUser($id: String!) {');
+      expect(output).toContain('query GetUserList($filter: JSON, $pagination: PaginationInput) {');
+    });
+  });
+
+  describe('with language config', () => {
+    const output = generateGraphQLClientContent(userEntity, [userEntity], {
+      graphqlRequestImport: '../../graphql',
+      apiTypesImport: '../../types',
+      language: { languageImport: '../../core/language' },
+    });
+
+    it('imports the consumer getLanguage function', () => {
+      expect(output).toContain("import { getLanguage } from '../../core/language'");
+    });
+
+    it('adds a lang argument to both the get and list queries', () => {
+      expect(output).toContain('query GetUser($id: String!, $lang: String) {');
+      expect(output).toContain('user(id: $id, lang: $lang)');
+      expect(output).toContain('query GetUserList($filter: JSON, $pagination: PaginationInput, $lang: String) {');
+      expect(output).toContain('userList(filter: $filter, pagination: $pagination, lang: $lang)');
+    });
+
+    it('accepts an optional langOverride, defaulting to the live current-language accessor', () => {
+      expect(output).toContain('export async function fetchUser(id: string, langOverride?: string)');
+      expect(output).toContain('{ id, lang: langOverride ?? getLanguage() }');
+      expect(output).toContain(
+        'export async function fetchUserList(filter?: any, pagination?: PaginationInput, langOverride?: string)'
+      );
+      expect(output).toContain('{ filter, pagination, lang: langOverride ?? getLanguage() }');
+    });
+
+    it('does not add lang to create/update/delete mutations', () => {
+      expect(output).toContain('export async function createUser(input: Partial<User>)');
+      expect(output).not.toContain('createUser(input: Partial<User>, lang');
+    });
+  });
+
+  describe('custom languageExport name', () => {
+    const output = generateGraphQLClientContent(userEntity, [userEntity], {
+      graphqlRequestImport: '../../graphql',
+      apiTypesImport: '../../types',
+      language: { languageImport: './lang', languageExport: 'currentLang' },
+    });
+
+    it('uses the custom export name throughout', () => {
+      expect(output).toContain("import { currentLang } from './lang'");
+      expect(output).toContain('lang: langOverride ?? currentLang()');
+    });
+  });
+
+  describe('requiresLang entity (per-entity translation table, no fallback language)', () => {
+    const translatedEntity: EntityMeta = { ...userEntity, name: 'Creature', camel: 'creature', kebab: 'creature', requiresLang: true };
+    const output = generateGraphQLClientContent(translatedEntity, [translatedEntity], {
+      graphqlRequestImport: '../../graphql',
+      apiTypesImport: '../../types',
+      language: { languageImport: '../../core/language' },
+    });
+
+    it('uses a non-null $lang: String! instead of the usual optional $lang: String', () => {
+      expect(output).toContain('query GetCreature($id: String!, $lang: String!) {');
+      expect(output).toContain('query GetCreatureList($filter: JSON, $pagination: PaginationInput, $lang: String!) {');
+      expect(output).not.toContain('$lang: String)');
+    });
+
+    it('still defaults to the live current-language accessor at the call site (always sends a real string)', () => {
+      expect(output).toContain('{ id, lang: langOverride ?? getLanguage() }');
+      expect(output).toContain('{ filter, pagination, lang: langOverride ?? getLanguage() }');
+    });
+
+    it('widens create/update input types to require lang', () => {
+      expect(output).toContain('export async function createCreature(input: Partial<Creature> & { lang: string })');
+      expect(output).toContain('export async function updateCreature(id: string, input: Partial<Creature> & { lang: string })');
+    });
+  });
+
+  describe('requiresLang entity without language config', () => {
+    // No `language` config - no $lang query variable and no langOverride (there's no
+    // languageExport accessor to default the fetch calls from). Mutations still widen to
+    // require `lang` regardless, since that's a fact about the server's input type, not
+    // something derived from the fetch-side language accessor.
+    const translatedEntity: EntityMeta = { ...userEntity, name: 'Creature', camel: 'creature', kebab: 'creature', requiresLang: true };
+    const output = generateGraphQLClientContent(translatedEntity, [translatedEntity], {
+      graphqlRequestImport: '../../graphql',
+      apiTypesImport: '../../types',
+    });
+
+    it('adds no lang argument to fetch queries', () => {
+      expect(output).not.toContain('$lang');
+      expect(output).not.toContain('langOverride');
+    });
+
+    it('still widens create/update input types to require lang', () => {
+      expect(output).toContain('export async function createCreature(input: Partial<Creature> & { lang: string })');
+      expect(output).toContain('export async function updateCreature(id: string, input: Partial<Creature> & { lang: string })');
+    });
+  });
 });
 
 // ── generateClientBarrelContent ──────────────────────────────────────────────
