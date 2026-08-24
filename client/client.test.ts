@@ -7,6 +7,7 @@ import {
   generateTypesBarrelContent,
   generateSchemasBarrelContent,
   generateEnumsContent,
+  generateTableSchemaTypeContent,
 } from './client';
 import type { EntityMeta, EnumMeta } from '../dmmf/dmmf.types';
 
@@ -206,6 +207,31 @@ describe('generateClientTypesContent', () => {
   });
 });
 
+// ── generateTableSchemaTypeContent ───────────────────────────────────────────
+
+describe('generateTableSchemaTypeContent', () => {
+  const output = generateTableSchemaTypeContent();
+
+  it('declares the full type union form-field rendering switches on, not just what the generator itself can produce', () => {
+    // 'select' | 'uuid' | 'range' are never emitted by generateClientSchemaContent (nothing in a
+    // Prisma schema implies them) but are legitimate hand-assigned-after-generation values a
+    // consumer's form renderer needs to switch on without a cast.
+    expect(output).toContain(
+      "type: 'text' | 'number' | 'float' | 'textarea' | 'boolean' | 'date' | 'relation' | 'select' | 'uuid' | 'range';",
+    );
+  });
+
+  it('includes every FieldSchema property a generic form renderer needs', () => {
+    for (const prop of ['placeholder', 'options', 'optionsLoader', 'readOnly', 'min', 'max', 'step']) {
+      expect(output).toContain(`${prop}?:`);
+    }
+  });
+
+  it('carries requiresLang on TableSchema', () => {
+    expect(output).toContain('requiresLang?: boolean;');
+  });
+});
+
 // ── generateClientSchemaContent ──────────────────────────────────────────────
 
 describe('generateClientSchemaContent', () => {
@@ -309,6 +335,21 @@ describe('generateClientSchemaContent', () => {
         optionsServiceImport: '../../options',
       }),
     ).toThrow(/primary key/);
+  });
+
+  it('emits requiresLang: true for a translation-table entity, omitted otherwise', () => {
+    const translatedEntity: EntityMeta = { ...userEntity, requiresLang: true };
+    const output = generateClientSchemaContent(translatedEntity, {
+      tableSchemaImport: '../../types',
+      optionsServiceImport: '../../options',
+    });
+    expect(output).toContain('requiresLang: true,');
+
+    const plainOutput = generateClientSchemaContent(userEntity, {
+      tableSchemaImport: '../../types',
+      optionsServiceImport: '../../options',
+    });
+    expect(plainOutput).not.toContain('requiresLang');
   });
 });
 

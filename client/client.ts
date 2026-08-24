@@ -114,16 +114,26 @@ export function generateTableSchemaTypeContent(): string {
  */
 
 export interface EntityOption {
-  value: string;
+  value: string | number;
   label: string;
 }
 
-export interface TableFieldConfig {
+export interface FieldSchema {
   name: string;
   label: string;
-  type: string;
+  // 'select' | 'uuid' | 'range' are never emitted by the generator itself (nothing in a Prisma
+  // schema implies them) - they're legitimate hand-assigned-after-generation values for a
+  // specific field's rendering, kept in the union so a generic form renderer can safely switch
+  // on \`type\` without a cast.
+  type: 'text' | 'number' | 'float' | 'textarea' | 'boolean' | 'date' | 'relation' | 'select' | 'uuid' | 'range';
   required?: boolean;
+  placeholder?: string;
+  options?: EntityOption[];
   optionsLoader?: () => Promise<EntityOption[]>;
+  readOnly?: boolean;
+  min?: number;
+  max?: number;
+  step?: number;
 }
 
 export interface TableSchema {
@@ -131,7 +141,14 @@ export interface TableSchema {
   displayName: string;
   primaryKey: string;
   sortField: string;
-  fields: TableFieldConfig[];
+  fields: FieldSchema[];
+  /**
+   * True for a per-entity-translation-table entity (EntityMeta.requiresLang) - its create/update
+   * mutations require a non-null \`lang\` argument with no fallback. A generic form driven purely
+   * off \`fields\` has no field for this (it's request context, not user-editable data) and must
+   * inject it into the save payload itself when this is true.
+   */
+  requiresLang?: boolean;
 }
 `;
 }
@@ -210,7 +227,7 @@ export const ${entity.camel}Schema: TableSchema = {
   displayName: '${entity.displayName}',
   primaryKey: '${primaryKey}',
   sortField: '${sortField}',
-  fields: [
+${entity.requiresLang ? '  requiresLang: true,\n' : ''}  fields: [
 ${allDefs},
   ],
 };
