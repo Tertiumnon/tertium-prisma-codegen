@@ -106,7 +106,7 @@ export function inferEntityMetadata(
     const translation = translationOwners.get(model.name);
     const filterable: Record<string, 'contains' | 'equals'> = {};
     const searchableFields: string[] = [];
-    const includeRelations: string[] = [];
+    const includeRelations: { name: string; targetTranslation?: import('./server.types').TranslationMetadata }[] = [];
 
     for (const field of model.fields) {
       if (field.kind === 'object') {
@@ -116,7 +116,12 @@ export function inferEntityMetadata(
         // be excluded, or Language ends up with a flat include/type reference to a model that
         // was never generated its own type/resolver for.
         if (translationModelNames.has(field.type)) continue;
-        includeRelations.push(field.name);
+        // This relation's target may itself be a translation-table entity (e.g.
+        // CreatureSkillMastery -> CreatureSkillMasteryKind) - carry that forward so the include/
+        // flatten logic can scope and unwrap it too, instead of silently dropping its
+        // translatable fields the way a flat `include: { x: true }` would.
+        const targetTranslation = translationOwners.get(field.type);
+        includeRelations.push({ name: field.name, ...(targetTranslation && { targetTranslation }) });
         continue;
       }
       if (field.kind !== 'scalar') continue;
@@ -241,7 +246,7 @@ export function generateGraphQLMetadataFileContent(metadata: Record<string, Enti
 export type EntityMetadata = {
   filterable?: Record<string, 'contains' | 'equals'>;
   searchableFields?: string[];
-  includeRelations?: string[];
+  includeRelations?: { name: string; targetTranslation?: { relationName: string; translationModelName: string; fkFieldName: string; fields: string[]; searchableFields?: string[] } }[];
   orderBy?: string;
   translation?: { relationName: string; translationModelName: string; fkFieldName: string; fields: string[]; searchableFields?: string[] };
 };
@@ -488,12 +493,40 @@ function _buildFilterLogicGQL(
 }
 
 function _buildInclude(metadata: EntityMetadata, langExpr?: string): string {
-  const parts = (metadata.includeRelations ?? []).map((r) => `${r}: true`);
+  const parts = (metadata.includeRelations ?? []).map((r) => {
+    // A relation whose target is itself a translation-table entity (e.g. CreatureSkillMastery ->
+    // CreatureSkillMasteryKind) needs the same scoped-include treatment as a top-level query,
+    // or its translatable fields are silently absent - `include: { x: true }` never touches x's
+    // own `translations` relation. `langExpr` may be undefined at runtime even when present at
+    // generation time (an optional `lang` on a non-translation-table entity's list/single query),
+    // so guard with a ternary rather than assuming it's always truthy.
+    if (r.targetTranslation && langExpr) {
+      return `${r.name}: { include: { ${r.targetTranslation.relationName}: { where: ${langExpr} ? { languageCode: ${langExpr} } : undefined } } }`;
+    }
+    return `${r.name}: true`;
+  });
   if (metadata.translation && langExpr) {
     parts.push(`${metadata.translation.relationName}: { where: { languageCode: ${langExpr} } }`);
   }
   if (parts.length === 0) return '';
   return `include: {\n            ${parts.join(',\n            ')},\n          },`;
+}
+
+/**
+ * Companion to `_buildInclude`'s nested scoped-include branch: the row Prisma returns still has
+ * the raw `{ translations: [...] }` shape on each nested relation, exactly like a top-level
+ * translation-table entity does before its own `flattenTranslation` call - so it needs the same
+ * unwrap, once per relation that was nested-included. Emits nothing when `langExpr` is absent
+ * (matches `_buildInclude` not nesting the include in that case either).
+ */
+function _buildNestedFlattenStatements(metadata: EntityMetadata, varName: string, langExpr?: string): string[] {
+  if (!langExpr) return [];
+  return (metadata.includeRelations ?? [])
+    .filter((r) => r.targetTranslation)
+    .map((r) => {
+      const t = r.targetTranslation!;
+      return `if (${varName}.${r.name}) ${varName}.${r.name} = flattenTranslation(${varName}.${r.name}, '${t.relationName}', ${JSON.stringify(t.fields)});`;
+    });
 }
 
 function _buildSingleResolver(modelName: string, metadata: EntityMetadata, localization?: LocalizationConfig): string {
@@ -503,6 +536,8 @@ function _buildSingleResolver(modelName: string, metadata: EntityMetadata, local
   if (t) {
     const includeLogic = _buildInclude(metadata, 'lang');
     const fieldsLiteral = JSON.stringify(t.fields);
+    const nestedFlatten = _buildNestedFlattenStatements(metadata, 'data', 'lang');
+    const nestedFlattenBlock = nestedFlatten.length ? `\n        if (data) {\n          ${nestedFlatten.join('\n          ')}\n        }` : '';
     return `
     ${camelCase}: async (
       _: any,
@@ -515,7 +550,7 @@ function _buildSingleResolver(modelName: string, metadata: EntityMetadata, local
         const data = await (prisma as any).${camelCase}.findUnique({
           where: { id },
           ${includeLogic}
-        });
+        });${nestedFlattenBlock}
         return data ? flattenTranslation(data, '${t.relationName}', ${fieldsLiteral}) : null;
       } catch (error) {
         console.error('GraphQL error in ${camelCase} query:', error);
@@ -524,9 +559,12 @@ function _buildSingleResolver(modelName: string, metadata: EntityMetadata, local
     },`;
   }
 
-  const includeLogic = _buildInclude(metadata);
+  const singleLangExpr = localization ? 'lang' : undefined;
+  const includeLogic = _buildInclude(metadata, singleLangExpr);
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
   const args = localization ? `{ id, lang }: { id: string; lang?: string }` : `{ id }: { id: string }`;
+  const nestedFlatten = _buildNestedFlattenStatements(metadata, 'data', singleLangExpr);
+  const nestedFlattenBlock = nestedFlatten.length ? `\n        if (data) {\n          ${nestedFlatten.join('\n          ')}\n        }` : '';
   const returnLogic = localization
     ? `\n        if (data && lang) {\n          return await ${localizeExport}(data, '${modelName}', lang);\n        }\n        return data;`
     : `\n        return data;`;
@@ -542,7 +580,7 @@ function _buildSingleResolver(modelName: string, metadata: EntityMetadata, local
         const data = await (prisma as any).${camelCase}.findUnique({
           where: { id },
           ${includeLogic}
-        });
+        });${nestedFlattenBlock}
 ${returnLogic}
       } catch (error) {
         console.error('GraphQL error in ${camelCase} query:', error);
@@ -568,6 +606,10 @@ function _buildListResolver(
   if (t) {
     const includeLogic = _buildInclude(metadata, 'lang');
     const fieldsLiteral = JSON.stringify(t.fields);
+    const nestedFlatten = _buildNestedFlattenStatements(metadata, 'item', 'lang');
+    const mapBody = nestedFlatten.length
+      ? `(item: any) => { ${nestedFlatten.join(' ')} return flattenTranslation(item, '${t.relationName}', ${fieldsLiteral}); }`
+      : `(item: any) => flattenTranslation(item, '${t.relationName}', ${fieldsLiteral})`;
     return `
     ${camelCase}List: async (
       _: any,
@@ -598,7 +640,7 @@ function _buildListResolver(
           }),
           (prisma as any).${camelCase}.count({ where }),
         ]);
-        return { data: data.map((item: any) => flattenTranslation(item, '${t.relationName}', ${fieldsLiteral})), total };
+        return { data: data.map(${mapBody}), total };
       } catch (error) {
         console.error('GraphQL error in ${camelCase}List query:', error);
         throw error;
@@ -606,13 +648,18 @@ function _buildListResolver(
     },`;
   }
 
-  const includeLogic = _buildInclude(metadata);
+  const listLangExpr = localization ? 'lang' : undefined;
+  const includeLogic = _buildInclude(metadata, listLangExpr);
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
   const args = localization
     ? `{ filter, pagination, lang }: { filter?: any; pagination?: any; lang?: string }`
     : `{ filter, pagination }: { filter?: any; pagination?: any }`;
+  const nestedFlatten = _buildNestedFlattenStatements(metadata, 'item', listLangExpr);
+  const localizeMapBody = nestedFlatten.length
+    ? `(item: any) => { ${nestedFlatten.join(' ')} return ${localizeExport}(item, '${modelName}', lang); }`
+    : `(item: any) => ${localizeExport}(item, '${modelName}', lang)`;
   const returnLogic = localization
-    ? `\n        let localizedData = data;\n        if (lang) {\n          localizedData = await Promise.all(\n            data.map((item: any) => ${localizeExport}(item, '${modelName}', lang)),\n          );\n        }\n        return { data: localizedData, total };`
+    ? `\n        let localizedData = data;\n        if (lang) {\n          localizedData = await Promise.all(\n            data.map(${localizeMapBody}),\n          );\n        }\n        return { data: localizedData, total };`
     : `\n        return { data, total };`;
 
   return `
@@ -661,6 +708,8 @@ function _buildCreateResolver(modelName: string, metadata: EntityMetadata, fkFie
     const fieldsLiteral = JSON.stringify(t.fields);
     const destructure = `const { lang, ${t.fields.join(', ')}, ...baseInput } = input;`;
     const baseData = fkFields?.length ? `transform${modelName}InputToPrisma(baseInput)` : 'baseInput';
+    const nestedFlatten = _buildNestedFlattenStatements(metadata, 'data', 'lang');
+    const nestedFlattenBlock = nestedFlatten.length ? `\n        ${nestedFlatten.join('\n        ')}` : '';
     return `
     create${modelName}: async (
       _: any,
@@ -678,7 +727,7 @@ function _buildCreateResolver(modelName: string, metadata: EntityMetadata, fkFie
             ${t.relationName}: { create: { languageCode: lang, ${t.fields.join(', ')} } },
           },
           ${includeLogic}
-        });
+        });${nestedFlattenBlock}
         return flattenTranslation(data, '${t.relationName}', ${fieldsLiteral});
       } catch (error) {
         console.error('GraphQL error in create${modelName} mutation:', error);
@@ -720,6 +769,8 @@ function _buildUpdateResolver(modelName: string, metadata: EntityMetadata, fkFie
     const destructure = `const { lang, ${t.fields.join(', ')}, ...baseInput } = input;`;
     const baseData = fkFields?.length ? `transform${modelName}InputToPrisma(baseInput)` : 'baseInput';
     const translatableAssignments = t.fields.map((f) => `${f}`).join(', ');
+    const nestedFlatten = _buildNestedFlattenStatements(metadata, 'data', 'lang');
+    const nestedFlattenBlock = nestedFlatten.length ? `\n        ${nestedFlatten.join('\n        ')}` : '';
     return `
     update${modelName}: async (
       _: any,
@@ -745,7 +796,7 @@ function _buildUpdateResolver(modelName: string, metadata: EntityMetadata, fkFie
             },
           },
           ${includeLogic}
-        });
+        });${nestedFlattenBlock}
         return flattenTranslation(data, '${t.relationName}', ${fieldsLiteral});
       } catch (error) {
         console.error('GraphQL error in update${modelName} mutation:', error);

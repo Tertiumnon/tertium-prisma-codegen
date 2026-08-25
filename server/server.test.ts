@@ -61,7 +61,7 @@ const graphqlMetadata = {
   Author: {
     filterable: { name: 'contains' as const, categoryId: 'equals' as const },
     searchableFields: ['name'],
-    includeRelations: ['Category'],
+    includeRelations: [{ name: 'Category' }],
     orderBy: 'name',
   },
   Category: {
@@ -788,5 +788,137 @@ describe('translation-table search - scoped by searchableFieldPatterns', () => {
     });
     const createBlock = output.slice(output.indexOf('createBook:'), output.indexOf('updateBook:'));
     expect(createBlock).toContain('translations: { create: { languageCode: lang, title, summary } },');
+  });
+});
+
+// ── Relations pointing AT a translation-table entity (not the entity itself) ───────────────────
+//
+// Regression coverage for a real bug: a model with a plain relation to a translation-table entity
+// (e.g. Library -> Book, where Book has BookTranslation) got a flat `include: { book: true }` -
+// Prisma never touched Book's own `translations` relation, so `book.title` etc. came back
+// `undefined` in every language, not just the one with missing content. The include needs to be
+// scoped the same way a top-level Book query is, and the fetched row needs the same flatten step.
+
+const nestedTranslationDmmfModels: DMMFModel[] = [
+  {
+    name: 'Library',
+    dbName: null,
+    fields: [
+      { name: 'id', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true },
+      { name: 'name', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      { name: 'bookId', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      {
+        name: 'book',
+        kind: 'object',
+        type: 'Book',
+        isRequired: true,
+        isList: false,
+        isId: false,
+        relationName: 'BookToLibrary',
+        relationFromFields: ['bookId'],
+        relationToFields: ['id'],
+      },
+    ],
+  },
+  {
+    name: 'Book',
+    dbName: null,
+    fields: [
+      { name: 'id', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true },
+      { name: 'name', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      {
+        name: 'translations',
+        kind: 'object',
+        type: 'BookTranslation',
+        isRequired: false,
+        isList: true,
+        isId: false,
+        relationName: 'BookToBookTranslation',
+        relationFromFields: [],
+        relationToFields: [],
+      },
+      {
+        name: 'library',
+        kind: 'object',
+        type: 'Library',
+        isRequired: false,
+        isList: true,
+        isId: false,
+        relationName: 'BookToLibrary',
+        relationFromFields: [],
+        relationToFields: [],
+      },
+    ],
+  },
+  {
+    name: 'BookTranslation',
+    dbName: null,
+    fields: [
+      { name: 'id', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: true },
+      { name: 'bookId', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      { name: 'languageCode', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      { name: 'title', kind: 'scalar', type: 'String', isRequired: true, isList: false, isId: false },
+      { name: 'summary', kind: 'scalar', type: 'String', isRequired: false, isList: false, isId: false },
+      {
+        name: 'book',
+        kind: 'object',
+        type: 'Book',
+        isRequired: true,
+        isList: false,
+        isId: false,
+        relationName: 'BookToBookTranslation',
+        relationFromFields: ['bookId'],
+        relationToFields: ['id'],
+      },
+    ],
+  },
+];
+
+const nestedTranslationMetadata = inferEntityMetadata(nestedTranslationDmmfModels, { searchableFieldPatterns: [/name/i] });
+
+describe('inferEntityMetadata - relation pointing at a translation-table entity', () => {
+  it('carries the target model translation metadata on the relation, not just its name', () => {
+    // targetTranslation comes straight from detectTranslationRelations (shared across every
+    // relation pointing at Book), not the per-owner searchableFields-scoped copy Book's own
+    // `metadata.Book.translation` gets - nothing reads searchableFields off a nested relation.
+    expect(nestedTranslationMetadata.Library?.includeRelations).toEqual([
+      {
+        name: 'book',
+        targetTranslation: {
+          relationName: 'translations',
+          translationModelName: 'BookTranslation',
+          fkFieldName: 'bookId',
+          fields: ['title', 'summary'],
+        },
+      },
+    ]);
+  });
+});
+
+describe('generateGraphQLResolversContent - relation pointing at a translation-table entity', () => {
+  const output = generateGraphQLResolversContent(nestedTranslationMetadata, nestedTranslationDmmfModels, {
+    prismaClientPath: PRISMA_PATH,
+    contextTypePath: CONTEXT_PATH,
+    localization: { localizeImport: './localization.entity' },
+  });
+
+  it('scopes the nested include to the requested language instead of a flat `true`', () => {
+    const libraryBlock = output.slice(output.indexOf('library:'), output.indexOf('libraryList:'));
+    expect(libraryBlock).toContain("book: { include: { translations: { where: lang ? { languageCode: lang } : undefined } } }");
+    expect(libraryBlock).not.toContain('book: true');
+  });
+
+  it('flattens the nested relation after fetching, in the single resolver', () => {
+    const libraryBlock = output.slice(output.indexOf('library:'), output.indexOf('libraryList:'));
+    expect(libraryBlock).toContain(
+      "if (data.book) data.book = flattenTranslation(data.book, 'translations', [\"title\",\"summary\"]);",
+    );
+  });
+
+  it('flattens the nested relation for every item in the list resolver', () => {
+    const libraryListBlock = output.slice(output.indexOf('libraryList:'), output.indexOf('createLibrary:'));
+    expect(libraryListBlock).toContain(
+      "if (item.book) item.book = flattenTranslation(item.book, 'translations', [\"title\",\"summary\"]);",
+    );
   });
 });

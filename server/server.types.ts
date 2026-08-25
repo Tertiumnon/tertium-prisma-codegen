@@ -25,10 +25,20 @@ export type ForeignKeyField = {
   isRequired: boolean;
 };
 
+export type IncludeRelation = {
+  name: string;
+  /**
+   * Set when this relation's target model is itself a translation-table entity (has its own
+   * `translation` metadata) - lets the generator emit a scoped nested include + flatten the
+   * related row too, instead of a flat `true` that silently drops its translatable fields.
+   */
+  targetTranslation?: TranslationMetadata;
+};
+
 export type EntityMetadata = {
   filterable?: Record<string, FilterMode>;
   searchableFields?: string[];
-  includeRelations?: string[];
+  includeRelations?: IncludeRelation[];
   orderBy?: string;
   /** Set when this model has a detected `<Model>Translation` relation - see TranslationMetadata. */
   translation?: TranslationMetadata;
