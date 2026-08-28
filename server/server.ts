@@ -1269,7 +1269,7 @@ function _buildFilterLogicREST(
 // ── REST router generator ─────────────────────────────────────────────────────
 
 export function generateRestRouterContent(models: Model[], config: RestRouterConfig): string {
-  const { entityImportBase, extraImports = '', extraRoutes = '', extraHelpers = '', localization } = config;
+  const { entityImportBase, extraImports = '', extraRoutes = '', extraHelpers = '', localization, metadataByModel } = config;
   const getLangExport = localization?.getLangExport ?? 'getLanguageFromRequest';
   const localizationImport = localization ? `import { ${getLangExport} } from '${localization.getLangImport}';\n` : '';
 
@@ -1281,13 +1281,23 @@ export function generateRestRouterContent(models: Model[], config: RestRouterCon
     })
     .join('\n');
 
-  const langArg = localization ? ', lang' : '';
-
   const routes = models
     .map((m) => {
       const kebab = toKebabCase(m.name);
       const camel = toCamelCase(m.name);
       const plural = kebab.endsWith('s') ? kebab : `${kebab}s`;
+      // With `metadataByModel` supplied, match generateRestHandlerContent's per-model signature
+      // exactly: `lang` only for models with a detected translation relation (required there),
+      // omitted entirely otherwise. Without it, fall back to the old blanket behavior, correct
+      // only when every handler was generated with the same `localization` config (which used to
+      // give every non-translated model an optional-but-unused `lang` param for this reason).
+      const langArg = localization
+        ? metadataByModel
+          ? metadataByModel[m.name]?.translation
+            ? ', lang'
+            : ''
+          : ', lang'
+        : '';
       return `    if (entity === '${plural}') {
       if (method === 'GET' && !id) return await ${camel}Rest.list${m.name}s(req${langArg});
       if (method === 'GET' && id) return await ${camel}Rest.get${m.name}(id${langArg});

@@ -110,4 +110,13 @@ export type RestRouterConfig = {
     getLangImport: string;
     getLangExport?: string;
   };
+  /**
+   * Per-model metadata (the same map passed to `generateRestHandlerContent` for each model) -
+   * lets the router pass `lang` only to models whose handler actually accepts it (required for
+   * `translation`-owning models, absent entirely for plain ones - see `generateRestHandlerContent`).
+   * Without this, a model with no `<Model>Translation` relation and no `localization` config gets
+   * a zero-arg handler signature, and passing `lang` to it unconditionally is a compile error.
+   * Omit for the old blanket-`localization` behavior (uniform optional `lang` on every handler).
+   */
+  metadataByModel?: Record<string, EntityMetadata>;
 };
