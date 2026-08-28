@@ -236,7 +236,7 @@ describe('generateTableSchemaTypeContent', () => {
 
 describe('generateClientSchemaContent', () => {
   it('generates TableSchema with fields', () => {
-    const output = generateClientSchemaContent(userEntity, {
+    const output = generateClientSchemaContent(userEntity, [userEntity], {
       tableSchemaImport: '../../types',
       optionsServiceImport: '../../options',
       skipFields: ['id'],
@@ -245,6 +245,26 @@ describe('generateClientSchemaContent', () => {
     expect(output).toContain("const userSchema");
     expect(output).toContain("email");
     expect(output).toContain("name");
+  });
+
+  it('embeds the relation target\'s own display field in the generated optionsLoader call, not just its name', () => {
+    const output = generateClientSchemaContent(postEntity, [userEntity, postEntity], {
+      tableSchemaImport: '../../types',
+      optionsServiceImport: '../../options',
+      sortFieldPreference: ['name', 'email'],
+    });
+
+    // userEntity has both "name" and "email" - "name" wins since it's first in sortFieldPreference.
+    expect(output).toContain("fetchAllEntityOptions('User', 'name')");
+  });
+
+  it('throws when a relation points at an entity not present in allEntities', () => {
+    expect(() =>
+      generateClientSchemaContent(postEntity, [postEntity], {
+        tableSchemaImport: '../../types',
+        optionsServiceImport: '../../options',
+      }),
+    ).toThrow(/relates to "User"/);
   });
 
   it('derives primaryKey from the field marked isPrimary (not hardcoded to "id")', () => {
@@ -279,7 +299,7 @@ describe('generateClientSchemaContent', () => {
       ],
     };
 
-    const output = generateClientSchemaContent(entityWithCustomPk, {
+    const output = generateClientSchemaContent(entityWithCustomPk, [entityWithCustomPk], {
       tableSchemaImport: '../../types',
       optionsServiceImport: '../../options',
     });
@@ -288,7 +308,7 @@ describe('generateClientSchemaContent', () => {
   });
 
   it('picks sortField from sortFieldPreference when a listed name exists on the entity', () => {
-    const output = generateClientSchemaContent(userEntity, {
+    const output = generateClientSchemaContent(userEntity, [userEntity], {
       tableSchemaImport: '../../types',
       optionsServiceImport: '../../options',
       sortFieldPreference: ['label', 'email', 'name'],
@@ -299,7 +319,7 @@ describe('generateClientSchemaContent', () => {
   });
 
   it('falls back to primaryKey for sortField when no preferred field exists', () => {
-    const output = generateClientSchemaContent(userEntity, {
+    const output = generateClientSchemaContent(userEntity, [userEntity], {
       tableSchemaImport: '../../types',
       optionsServiceImport: '../../options',
       sortFieldPreference: ['nonexistentA', 'nonexistentB'],
@@ -330,7 +350,7 @@ describe('generateClientSchemaContent', () => {
     };
 
     expect(() =>
-      generateClientSchemaContent(entityWithoutPk, {
+      generateClientSchemaContent(entityWithoutPk, [entityWithoutPk], {
         tableSchemaImport: '../../types',
         optionsServiceImport: '../../options',
       }),
@@ -339,13 +359,13 @@ describe('generateClientSchemaContent', () => {
 
   it('emits requiresLang: true for a translation-table entity, omitted otherwise', () => {
     const translatedEntity: EntityMeta = { ...userEntity, requiresLang: true };
-    const output = generateClientSchemaContent(translatedEntity, {
+    const output = generateClientSchemaContent(translatedEntity, [translatedEntity], {
       tableSchemaImport: '../../types',
       optionsServiceImport: '../../options',
     });
     expect(output).toContain('requiresLang: true,');
 
-    const plainOutput = generateClientSchemaContent(userEntity, {
+    const plainOutput = generateClientSchemaContent(userEntity, [userEntity], {
       tableSchemaImport: '../../types',
       optionsServiceImport: '../../options',
     });

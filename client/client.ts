@@ -165,7 +165,27 @@ function _prettifyLabel(name: string): string {
     .join('');
 }
 
-export function generateClientSchemaContent(entity: EntityMeta, config: ClientSchemaConfig): string {
+/**
+ * The field a relation's options dropdown should display per option, e.g. `name`/`title` if the
+ * target entity has one, else its primary key - same preference-list logic used for an entity's
+ * own `sortField`, just evaluated against a *different* entity's field list. Exported so the
+ * relation-target lookup below and each entity's own `sortField` computation share one
+ * implementation instead of two copies of the same fallback chain.
+ */
+export function computeDisplayField(entity: EntityMeta, sortFieldPreference: string[]): string {
+  const primaryKey = entity.fields.find((f) => f.isPrimary)?.name;
+  if (!primaryKey) {
+    throw new Error(`computeDisplayField: entity "${entity.name}" has no field marked as primary key`);
+  }
+  const fieldNameSet = new Set(entity.fields.map((f) => f.name));
+  return sortFieldPreference.find((n) => fieldNameSet.has(n)) ?? primaryKey;
+}
+
+export function generateClientSchemaContent(
+  entity: EntityMeta,
+  allEntities: EntityMeta[],
+  config: ClientSchemaConfig,
+): string {
   const {
     tableSchemaImport,
     optionsServiceImport,
@@ -178,12 +198,13 @@ export function generateClientSchemaContent(entity: EntityMeta, config: ClientSc
   const skipSet = new Set(skipFields);
   const largeTextSet = new Set(largeTextFields);
 
+  // computeDisplayField already throws if there's no primary key, so this is always defined below.
   const primaryKey = entity.fields.find((f) => f.isPrimary)?.name;
-  if (!primaryKey) {
-    throw new Error(`generateClientSchemaContent: entity "${entity.name}" has no field marked as primary key`);
-  }
-  const fieldNameSet = new Set(entity.fields.map((f) => f.name));
-  const sortField = sortFieldPreference.find((n) => fieldNameSet.has(n)) ?? primaryKey;
+  const sortField = computeDisplayField(entity, sortFieldPreference);
+
+  // Keyed by name for the relation-target lookup below - each relation field points at another
+  // entity, and that entity's own display field (not this one's) is what the dropdown should show.
+  const entityByName = new Map(allEntities.map((e) => [e.name, e]));
 
   const formFields = entity.fields.filter((f) => !f.isRelation && !skipSet.has(f.name));
   const regularFields = formFields.filter((f) => !largeTextSet.has(f.name));
@@ -195,13 +216,24 @@ export function generateClientSchemaContent(entity: EntityMeta, config: ClientSc
       const required = f.required ? ', required: true' : '';
 
       if (f.formType === 'relation' && f.relationModel) {
+        const targetEntity = entityByName.get(f.relationModel);
+        // No fallback guess if the target isn't in this generation pass - a relation pointing at
+        // an entity the generator doesn't know about is itself a bug worth surfacing at generate
+        // time, not silently working around at runtime.
+        if (!targetEntity) {
+          throw new Error(
+            `generateClientSchemaContent: entity "${entity.name}" field "${f.name}" relates to ` +
+              `"${f.relationModel}", which isn't in the entity list passed to this generator.`,
+          );
+        }
+        const targetDisplayField = computeDisplayField(targetEntity, sortFieldPreference);
         return `  {
     name: '${f.name}',
     label: '${label}',
     type: 'relation' as const,
     optionsLoader: async () => {
       const { ${optionsServiceExport} } = await import('${optionsServiceImport}');
-      return ${optionsServiceExport}('${f.relationModel}');
+      return ${optionsServiceExport}('${f.relationModel}', '${targetDisplayField}');
     },
   }`;
       }

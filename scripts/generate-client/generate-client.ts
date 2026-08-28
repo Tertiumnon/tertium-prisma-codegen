@@ -97,7 +97,7 @@ for (const entity of entities) {
 
   write(
     join(dir, `${entity.kebab}.schema.auto.ts`),
-    generateClientSchemaContent(entity, {
+    generateClientSchemaContent(entity, entities, {
       tableSchemaImport: config.tableSchemaImport,
       optionsServiceImport: config.optionsServiceImport,
       skipFields: config.skipFields,
