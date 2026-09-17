@@ -104,6 +104,13 @@ for (const model of models) {
   const dir = join(config.entitiesDir, kebab);
   mkdirSync(dir, { recursive: true });
 
+  // Scoped to fields this model actually has - sensitiveFields is a global name list (it may name
+  // a field that only exists on one model in the whole schema), and generateRestHandlerContent has
+  // no field list of its own to intersect against, so every other model would otherwise get a
+  // dead omitSensitive() no-op wired into its handlers for a field it never had.
+  const modelFieldNames = new Set(model.fields.map((f) => f.name));
+  const modelSensitiveFields = config.sensitiveFields.filter((f) => modelFieldNames.has(f));
+
   writeFileSync(
     join(dir, `${kebab}.types.auto.ts`),
     generateEntityTypesContent(model, metadata, { sensitiveFields: config.sensitiveFields }),
@@ -112,7 +119,7 @@ for (const model of models) {
     join(dir, `${kebab}.rest.auto.ts`),
     generateRestHandlerContent(model.name, metadata[model.name] ?? {}, {
       prismaClientPath: config.prismaSingletonPath,
-      sensitiveFields: config.sensitiveFields,
+      sensitiveFields: modelSensitiveFields,
     }),
   );
 
