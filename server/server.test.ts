@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import {
+  generateEntityTypesContent,
   generateGraphQLResolversContent,
   generateGraphQLSchemaContent,
   generateRestHandlerContent,
@@ -339,6 +340,41 @@ describe('generateGraphQLSchemaContent', () => {
   });
 });
 
+describe('generateGraphQLSchemaContent - sensitiveFields', () => {
+  const models = parsePrismaModels(dmmfModels);
+  const output = generateGraphQLSchemaContent(models, graphqlMetadata, { sensitiveFields: ['bio'] });
+
+  it('omits the sensitive field from the object type entirely', () => {
+    expect(output).toContain('type Author {');
+    expect(output).not.toMatch(/type Author \{[^}]*bio/);
+  });
+
+  it('omits the sensitive field from both Create and Update input types', () => {
+    expect(output).not.toMatch(/input CreateAuthorInput \{[^}]*bio/);
+    expect(output).not.toMatch(/input UpdateAuthorInput \{[^}]*bio/);
+  });
+
+  it('does not affect a model that has no field by that name', () => {
+    expect(output).toContain('type Category {');
+    expect(output).toContain('input CreateCategoryInput {\n  name: String\n}');
+  });
+});
+
+describe('generateEntityTypesContent - sensitiveFields', () => {
+  const models = parsePrismaModels(dmmfModels);
+  const authorModel = models.find((m) => m.name === 'Author')!;
+
+  it('omits the sensitive field from both the read type and the input type', () => {
+    const output = generateEntityTypesContent(authorModel, graphqlMetadata, { sensitiveFields: ['bio'] });
+    expect(output).not.toContain('bio');
+  });
+
+  it('keeps it when no sensitiveFields are configured', () => {
+    const output = generateEntityTypesContent(authorModel, graphqlMetadata);
+    expect(output).toContain('bio?: string;');
+  });
+});
+
 // ── generateRestHandlerContent ────────────────────────────────────────────────
 
 const REST_PRISMA_PATH = '../../db/prisma.client';
@@ -449,6 +485,41 @@ describe('generateRestHandlerContent', () => {
       });
       expect(output).toContain("localizeEntity(item, 'UserProfile', lang)");
       expect(output).toContain("localizeEntity(data, 'UserProfile', lang)");
+    });
+  });
+
+  describe('sensitiveFields', () => {
+    const output = generateRestHandlerContent('Author', handlerMetadata, {
+      prismaClientPath: REST_PRISMA_PATH,
+      sensitiveFields: ['hash'],
+    });
+
+    it('generates an omitSensitive helper that deletes the field', () => {
+      expect(output).toContain('function omitSensitive');
+      expect(output).toContain("delete clone['hash'];");
+    });
+
+    it('strips the field from list and get responses', () => {
+      expect(output).toContain('data: data.map(omitSensitive)');
+      expect(output).toContain('JSON.stringify(omitSensitive(data))');
+    });
+
+    it('sanitizes the request body before it reaches Prisma in create and update', () => {
+      expect(output).toContain('const rawInput = await req.json();\n    const input = omitSensitive(rawInput);');
+    });
+
+    it('strips the field from the delete response too', () => {
+      const deleteBlock = output.slice(output.indexOf('export async function deleteAuthor'));
+      expect(deleteBlock).toContain('JSON.stringify(omitSensitive(data))');
+    });
+  });
+
+  describe('no sensitiveFields (default)', () => {
+    const output = generateRestHandlerContent('Author', handlerMetadata, { prismaClientPath: REST_PRISMA_PATH });
+
+    it('generates no omitSensitive helper or calls', () => {
+      expect(output).not.toContain('omitSensitive');
+      expect(output).toContain('const input = await req.json();');
     });
   });
 });

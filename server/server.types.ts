@@ -64,6 +64,13 @@ export type MetadataInferrerOptions = {
 export type TypesGeneratorOptions = {
   skipInputFields?: string[];
   /**
+   * Field names (matched globally, across every model) to omit from BOTH the read type and the
+   * input type entirely - e.g. a password hash column. Unlike `skipInputFields` (write-side only,
+   * for fields like `id`/`createdAt` a client shouldn't set but should still be able to read),
+   * a sensitive field must never round-trip through generated code at all.
+   */
+  sensitiveFields?: string[];
+  /**
    * Computes the import path for a related entity's type, relative to the file being generated.
    * Defaults to `../{kebab-case}/{kebab-case}.types.auto`.
    */
@@ -99,6 +106,13 @@ export type RestHandlerConfig = {
   localization?: LocalizationConfig;
   /** See `GraphQLResolverConfig.caseInsensitiveSearch` - same meaning, REST twin. */
   caseInsensitiveSearch?: boolean;
+  /**
+   * Field names (matched globally, across every model) stripped from every REST response
+   * (list/get) and from create/update request bodies before they reach Prisma - e.g. a password
+   * hash column. REST has no schema layer to lean on the way GraphQL's SDL does, so this handler
+   * needs its own filtering.
+   */
+  sensitiveFields?: string[];
 };
 
 export type RestRouterConfig = {

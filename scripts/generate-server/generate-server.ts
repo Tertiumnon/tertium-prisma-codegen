@@ -48,6 +48,7 @@ const config: ServerGeneratorConfig = {
   skipFilterable: getArgList('skip-filterable', DEFAULT_CONFIG.skipFilterable),
   orderByPreference: getArgList('order-by-preference', DEFAULT_CONFIG.orderByPreference),
   excludeModels: getArgList('exclude-models', DEFAULT_CONFIG.excludeModels),
+  sensitiveFields: getArgList('sensitive-fields', DEFAULT_CONFIG.sensitiveFields),
 };
 
 function getDMMFModels(): DMMFModel[] {
@@ -80,7 +81,9 @@ const models = parsePrismaModels(dmmfModels);
 const metadata = inferEntityMetadata(dmmfModels, {
   searchableFieldPatterns: config.searchablePatterns,
   enumLikeIntPatterns: config.enumIntPatterns,
-  skipFilterableFields: config.skipFilterable,
+  // A sensitive field must not be filterable either - `filter.hash = { contains: 'x' }` would
+  // otherwise turn into a substring-matching oracle for a field nothing can read directly.
+  skipFilterableFields: [...config.skipFilterable, ...config.sensitiveFields],
   orderByFieldPreference: config.orderByPreference,
 });
 
@@ -101,11 +104,15 @@ for (const model of models) {
   const dir = join(config.entitiesDir, kebab);
   mkdirSync(dir, { recursive: true });
 
-  writeFileSync(join(dir, `${kebab}.types.auto.ts`), generateEntityTypesContent(model, metadata));
+  writeFileSync(
+    join(dir, `${kebab}.types.auto.ts`),
+    generateEntityTypesContent(model, metadata, { sensitiveFields: config.sensitiveFields }),
+  );
   writeFileSync(
     join(dir, `${kebab}.rest.auto.ts`),
     generateRestHandlerContent(model.name, metadata[model.name] ?? {}, {
       prismaClientPath: config.prismaSingletonPath,
+      sensitiveFields: config.sensitiveFields,
     }),
   );
 
@@ -132,7 +139,7 @@ writeFileSync(
 console.log(`  ✓ ${config.graphqlResolversOut}`);
 
 mkdirSync(config.graphqlSchemaOut.replace(/\/[^/]+$/, ''), { recursive: true });
-writeFileSync(config.graphqlSchemaOut, generateGraphQLSchemaContent(models, metadata));
+writeFileSync(config.graphqlSchemaOut, generateGraphQLSchemaContent(models, metadata, { sensitiveFields: config.sensitiveFields }));
 console.log(`  ✓ ${config.graphqlSchemaOut}`);
 
 console.log(`\n✅ Done — ${models.length} entities generated.\n`);

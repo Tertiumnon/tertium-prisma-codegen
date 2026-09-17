@@ -11,6 +11,7 @@ export const DEFAULT_CONFIG = {
   skipFilterable: [],
   orderByPreference: ['name', 'title', 'createdAt'],
   excludeModels: [],
+  sensitiveFields: [],
 };
 
 export const CLI_ARGS_HELP = `
@@ -28,4 +29,7 @@ Options (all optional with sensible defaults):
   --order-by-preference          Comma-separated field names for orderBy preference
   --exclude-models               Comma-separated model names to omit entirely (no entity, REST, or
                                   GraphQL CRUD - use for internal-only tables like refresh tokens)
+  --sensitive-fields             Comma-separated field names never exposed by generated code (not
+                                  readable, not settable, stripped from every REST response) - use
+                                  for columns like a password hash on an otherwise-normal entity
 `;

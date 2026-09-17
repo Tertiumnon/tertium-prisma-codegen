@@ -193,9 +193,12 @@ export function generateEntityTypesContent(
   options: TypesGeneratorOptions = {},
 ): string {
   const skipInputFields = options.skipInputFields ? new Set(options.skipInputFields) : DEFAULT_SKIP_INPUT_FIELDS;
+  const sensitiveFields = new Set(options.sensitiveFields ?? []);
   const relationImportPath = options.relationImportPath ?? ((name: string) => `../${toKebabCase(name)}/${toKebabCase(name)}.types.auto`);
   const t = allMetadata[model.name]?.translation;
-  const scalarFields = model.fields.filter((f) => !f.isRelation);
+  // Filtered up front so a sensitive field is invisible to both the read type
+  // (mainFields) and the input type (inputFields) below, not just one of them.
+  const scalarFields = model.fields.filter((f) => !f.isRelation && !sensitiveFields.has(f.name));
   // Exclude this model's own translation relation (handled by flattening below) AND any relation
   // to a `<Model>Translation` table from ANOTHER model's side (e.g. `Language.creatureTranslations`)
   // - a translation model is never a first-class entity anywhere, so it never gets its own
@@ -873,13 +876,19 @@ function _gqlFieldType(f: Field): string {
   return f.required ? `${scalar}!` : scalar;
 }
 
-function _buildObjectType(model: Model, metadata: Record<string, EntityMetadata>): string {
+function _buildObjectType(model: Model, metadata: Record<string, EntityMetadata>, sensitiveFields: Set<string> = new Set()): string {
   const t = metadata[model.name]?.translation;
   const fields = model.fields
-    // Drop this model's own translation relation (flattened below) and any relation to a
+    // Drop this model's own translation relation (flattened below), any relation to a
     // `<Model>Translation` table from another model's side (e.g. `Language.creatureTranslations`)
-    // - it was never given its own GraphQL type to reference.
-    .filter((f) => !(t && f.isRelation && f.name === t.relationName) && !(f.isRelation && isTranslationModel(f.type, metadata)))
+    // - it was never given its own GraphQL type to reference - and any sensitive field (e.g. a
+    // password hash), which must never be a selectable field on this type at all.
+    .filter(
+      (f) =>
+        !(t && f.isRelation && f.name === t.relationName) &&
+        !(f.isRelation && isTranslationModel(f.type, metadata)) &&
+        !sensitiveFields.has(f.name),
+    )
     .map((f) => `  ${f.name}: ${_gqlFieldType(f)}`);
   if (t) {
     // Always nullable: the underlying `<Model>Translation` column may be NOT NULL, but a
@@ -932,9 +941,12 @@ function _buildMutationFields(modelNames: string[]): string {
 export function generateGraphQLSchemaContent(
   models: Model[],
   metadata: Record<string, EntityMetadata>,
-  options: { skipInputFields?: string[]; hasLocalization?: boolean; extend?: boolean } = {},
+  options: { skipInputFields?: string[]; hasLocalization?: boolean; extend?: boolean; sensitiveFields?: string[] } = {},
 ): string {
-  const skipInputFields = options.skipInputFields ? new Set(options.skipInputFields) : DEFAULT_SKIP_INPUT_FIELDS;
+  const sensitiveFields = new Set(options.sensitiveFields ?? []);
+  // A sensitive field is never settable either, on top of whatever skipInputFields already omits
+  // (id/createdAt/updatedAt by default) - merged here so callers only have one list to maintain.
+  const skipInputFields = new Set([...(options.skipInputFields ? new Set(options.skipInputFields) : DEFAULT_SKIP_INPUT_FIELDS), ...sensitiveFields]);
   const hasLocalization = options.hasLocalization ?? false;
   const extend = options.extend ?? false;
   // Only entities present in `metadata` get resolvers generated (see
@@ -944,7 +956,7 @@ export function generateGraphQLSchemaContent(
   const operableModels = visibleModels.filter((m) => metadata[m.name]);
   const operableNames = operableModels.map((m) => m.name);
 
-  const objectTypes = visibleModels.map((m) => _buildObjectType(m, metadata)).join('\n\n');
+  const objectTypes = visibleModels.map((m) => _buildObjectType(m, metadata, sensitiveFields)).join('\n\n');
   const listTypes = operableModels.map((m) => _buildListType(m)).join('\n\n');
   const createInputs = operableModels.map((m) => _buildInputType(m, 'Create', skipInputFields, metadata[m.name])).join('\n\n');
   const updateInputs = operableModels.map((m) => _buildInputType(m, 'Update', skipInputFields, metadata[m.name])).join('\n\n');
@@ -1001,10 +1013,25 @@ export function generateRestHandlerContent(
   if (!orderBy) {
     throw new Error(`Missing orderBy in metadata for "${modelName}"`);
   }
-  const { localization, caseInsensitiveSearch = true } = config;
+  const { localization, caseInsensitiveSearch = true, sensitiveFields = [] } = config;
   const filterLogic = _buildFilterLogicREST(modelName, metadata, localization, caseInsensitiveSearch);
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
   const t = metadata.translation;
+  // REST has no schema layer to lean on the way GraphQL's SDL does (which simply omits a
+  // sensitive field from the type), so responses and write bodies need explicit stripping here.
+  const hasSensitive = sensitiveFields.length > 0;
+  const omitSensitiveFn = hasSensitive
+    ? `
+function omitSensitive<T extends Record<string, any>>(obj: T): Partial<T> {
+  const clone: any = { ...obj };
+  ${sensitiveFields.map((f) => `delete clone['${f}'];`).join('\n  ')}
+  return clone;
+}
+`
+    : '';
+  const inputParseLine = hasSensitive
+    ? 'const rawInput = await req.json();\n    const input = omitSensitive(rawInput);'
+    : 'const input = await req.json();';
 
   const localizationImport = localization ? `import { ${localizeExport} } from '${localization.localizeImport}';\n` : '';
 
@@ -1111,7 +1138,7 @@ function validateInputIDs(input: any): string | null {
   }
   return null;
 }
-${flattenTranslationFn}
+${omitSensitiveFn}${flattenTranslationFn}
 export async function ${listSignature}: Promise<Response> {
   try {${listGuard}
     const url = new URL(req.url);
@@ -1145,7 +1172,7 @@ export async function ${listSignature}: Promise<Response> {
     ]);
 ${localizeList}
     return new Response(
-      JSON.stringify({ data: ${listData}, pagination: { limit, offset, total, hasMore: offset + limit < total } }),
+      JSON.stringify({ data: ${hasSensitive ? `${listData}.map(omitSensitive)` : listData}, pagination: { limit, offset, total, hasMore: offset + limit < total } }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     );
   } catch (error) {
@@ -1159,7 +1186,7 @@ export async function ${getSignature}: Promise<Response> {
     const data = await (prisma as any).${camelCase}.findUnique({ where: { id }${getInclude} });
     if (!data) return jsonError(404, '${modelName} not found');
 ${localizeGet}
-    return new Response(JSON.stringify(${getData}), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(${hasSensitive ? `omitSensitive(${getData})` : getData}), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(500, (error as Error).message);
   }
@@ -1167,9 +1194,9 @@ ${localizeGet}
 
 export async function create${modelName}(req: Request): Promise<Response> {
   try {
-    const input = await req.json();
+    ${inputParseLine}
 ${createLogic}
-    return new Response(JSON.stringify(data), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(${hasSensitive ? 'omitSensitive(data)' : 'data'}), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(400, (error as Error).message);
   }
@@ -1178,9 +1205,9 @@ ${createLogic}
 export async function update${modelName}(id: string, req: Request): Promise<Response> {
   try {
     if (!isValidUUID(id)) return jsonError(400, 'Invalid ID format - must be a valid UUID');
-    const input = await req.json();
+    ${inputParseLine}
 ${updateLogic}
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(${hasSensitive ? 'omitSensitive(data)' : 'data'}), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(400, (error as Error).message);
   }
@@ -1190,7 +1217,7 @@ export async function delete${modelName}(id: string): Promise<Response> {
   try {
     if (!isValidUUID(id)) return jsonError(400, 'Invalid ID format - must be a valid UUID');
     const data = await (prisma as any).${camelCase}.delete({ where: { id } });
-    return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify(${hasSensitive ? 'omitSensitive(data)' : 'data'}), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(500, (error as Error).message);
   }
