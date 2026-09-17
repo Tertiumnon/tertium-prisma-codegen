@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG = {
   enumIntPatterns: [],
   skipFilterable: [],
   orderByPreference: ['name', 'title', 'createdAt'],
+  excludeModels: [],
 };
 
 export const CLI_ARGS_HELP = `
@@ -25,4 +26,6 @@ Options (all optional with sensible defaults):
   --enum-int-patterns            Comma-separated regex patterns for enum-like int fields
   --skip-filterable              Comma-separated field names to exclude from filterable
   --order-by-preference          Comma-separated field names for orderBy preference
+  --exclude-models               Comma-separated model names to omit entirely (no entity, REST, or
+                                  GraphQL CRUD - use for internal-only tables like refresh tokens)
 `;

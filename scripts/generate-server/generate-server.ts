@@ -47,6 +47,7 @@ const config: ServerGeneratorConfig = {
   enumIntPatterns: getArgList('enum-int-patterns', DEFAULT_CONFIG.enumIntPatterns).map((p) => new RegExp(p, 'i')),
   skipFilterable: getArgList('skip-filterable', DEFAULT_CONFIG.skipFilterable),
   orderByPreference: getArgList('order-by-preference', DEFAULT_CONFIG.orderByPreference),
+  excludeModels: getArgList('exclude-models', DEFAULT_CONFIG.excludeModels),
 };
 
 function getDMMFModels(): DMMFModel[] {
@@ -65,7 +66,16 @@ function getDMMFModels(): DMMFModel[] {
   }));
 }
 
-const dmmfModels = getDMMFModels();
+// Drop excluded models entirely, and strip any relation field on a remaining
+// model that points at one - otherwise e.g. User.RefreshToken would still
+// surface a dangling reference to a type that no longer gets generated.
+const excludeSet = new Set(config.excludeModels);
+const dmmfModels = getDMMFModels()
+  .filter((model) => !excludeSet.has(model.name))
+  .map((model) => ({
+    ...model,
+    fields: model.fields.filter((field) => !(field.kind === 'object' && excludeSet.has(field.type))),
+  }));
 const models = parsePrismaModels(dmmfModels);
 const metadata = inferEntityMetadata(dmmfModels, {
   searchableFieldPatterns: config.searchablePatterns,
