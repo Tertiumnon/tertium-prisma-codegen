@@ -25,7 +25,8 @@
     "typecheck": "tsc --noEmit",
     "release:patch": "bun node_modules/@tertium/js/scripts/release/release.ts patch",
     "release:minor": "bun node_modules/@tertium/js/scripts/release/release.ts minor",
-    "release:major": "bun node_modules/@tertium/js/scripts/release/release.ts major"
+    "release:major": "bun node_modules/@tertium/js/scripts/release/release.ts major",
+    "workflow:publish": "bun node_modules/@tertium/js/scripts/npm-publish-workflow/npm-publish-workflow.ts"
   },
   "author": "Vitalii Balabanov",
   "license": "ISC",
