@@ -20,7 +20,9 @@
   ],
   "scripts": {
     "test": "bun test",
-    "lint:ts:check": "bunx tsc --noEmit",
+    "lint": "biome lint scripts dmmf server client",
+    "lint:fix": "biome lint --write scripts dmmf server client",
+    "typecheck": "tsc --noEmit",
     "release:patch": "bun node_modules/@tertium/js/scripts/release/release.ts patch",
     "release:minor": "bun node_modules/@tertium/js/scripts/release/release.ts minor",
     "release:major": "bun node_modules/@tertium/js/scripts/release/release.ts major"
@@ -31,6 +33,7 @@
     "access": "public"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
     "@tertium/js": "^3.0.0",
     "@types/bun": "^1.3.9",
     "typescript": "^5.8.3"
