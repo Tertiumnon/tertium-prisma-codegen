@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
-import { join, relative, dirname, sep } from 'path';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative, dirname, sep } from 'node:path';
 import type { EntityMeta, EnumMeta } from '../../dmmf/dmmf.types';
 import {
   generateClientTypesContent,

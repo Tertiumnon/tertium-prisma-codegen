@@ -227,7 +227,7 @@ export function generateEntityTypesContent(
  * ${model.name} Types
  * Auto-generated from Prisma schema - DO NOT EDIT
  */
-${imports ? '\n' + imports + '\n' : ''}
+${imports ? `\n${imports}\n` : ''}
 export interface ${model.name} {
 ${mainFields}
 }
@@ -274,7 +274,7 @@ export interface GraphQLResolverContext {
   userId?: string;
   isAdmin?: boolean;
   userRoles?: string[];
-${extra ? extra + '\n' : ''}}\n`;
+${extra ? `${extra}\n` : ''}}\n`;
 }
 
 // ── GraphQL resolvers generator ───────────────────────────────────────────────
@@ -370,7 +370,7 @@ function validateInputIDs(input: any): string | null {
   return null;
 }
 ${flattenTranslationFn}
-${transformFunctions ? transformFunctions + '\n' : ''}
+${transformFunctions ? `${transformFunctions}\n` : ''}
 export interface ResolverContext extends ${contextTypeExport} {
   prisma: ${prismaClientExport};
 }

@@ -1,4 +1,4 @@
-import type { DMMFField, DMMFModel, FilterMode, TranslationMetadata } from '../dmmf/dmmf.types';
+import type { FilterMode, TranslationMetadata } from '../dmmf/dmmf.types';
 
 export type { TranslationMetadata };
 

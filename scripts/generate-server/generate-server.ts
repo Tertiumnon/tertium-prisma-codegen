@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { DMMFModel } from '../../dmmf/dmmf.types';
 import {
   parsePrismaModels,
@@ -52,12 +52,9 @@ const config: ServerGeneratorConfig = {
 };
 
 function getDMMFModels(): DMMFModel[] {
-  let PrismaClient;
-  if (config.prismaClientImport.startsWith('.')) {
-    PrismaClient = require(join(process.cwd(), config.prismaClientImport.replace(/^\.\//, ''))).PrismaClient;
-  } else {
-    PrismaClient = require(config.prismaClientImport).PrismaClient;
-  }
+  const PrismaClient = config.prismaClientImport.startsWith('.')
+    ? require(join(process.cwd(), config.prismaClientImport.replace(/^\.\//, ''))).PrismaClient
+    : require(config.prismaClientImport).PrismaClient;
   const pc = new PrismaClient();
   const runtime = (pc as any)._runtimeDataModel;
   return Object.entries(runtime.models as Record<string, { fields: any[]; dbName?: string | null }>).map(([name, m]) => ({

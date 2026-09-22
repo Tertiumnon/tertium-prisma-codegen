@@ -100,7 +100,7 @@ export function generateClientTypesContent(
  * ${entity.displayName} — auto-generated, do not edit
  */
 
-${importSection ? importSection + '\n\n' : ''}export interface ${entity.name} {
+${importSection ? `${importSection}\n\n` : ''}export interface ${entity.name} {
 ${fields}
 }
 `;
