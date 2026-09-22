@@ -1013,7 +1013,21 @@ export function generateRestHandlerContent(
   if (!orderBy) {
     throw new Error(`Missing orderBy in metadata for "${modelName}"`);
   }
-  const { localization, caseInsensitiveSearch = true, sensitiveFields = [] } = config;
+  const { localization, caseInsensitiveSearch = true, sensitiveFields = [], ownership } = config;
+
+  // Both halves of ownership are required. A model that declares an `owner` rule is declaring
+  // that its rows belong to somebody; emitting an unscoped handler for it would be worse than
+  // not generating one at all, so refuse rather than quietly produce it.
+  if (metadata.owner && !ownership) {
+    throw new Error(
+      `Model "${modelName}" declares an \`owner\` rule but no \`ownership\` config was passed ` +
+        `to generateRestHandlerContent. Pass config.ownership, or remove the rule.`,
+    );
+  }
+  const owner = ownership ? metadata.owner : undefined;
+  const callerExport = ownership?.callerExport ?? 'callerIdFromRequest';
+  const ownershipImport = owner ? `import { ${callerExport} } from '${ownership!.callerImport}';\n` : '';
+
   const filterLogic = _buildFilterLogicREST(modelName, metadata, localization, caseInsensitiveSearch);
   const localizeExport = localization?.localizeExport ?? 'localizeEntity';
   const t = metadata.translation;
@@ -1035,6 +1049,23 @@ function omitSensitive<T extends Record<string, any>>(obj: T): Partial<T> {
 
   const localizationImport = localization ? `import { ${localizeExport} } from '${localization.localizeImport}';\n` : '';
 
+  // The Prisma `where` fragment restricting rows to the caller. Direct ownership compares a
+  // column; indirect ownership nests a relation filter.
+  const ownerWhere = owner
+    ? 'field' in owner
+      ? `{ ${owner.field}: callerId }`
+      : `{ ${owner.via.relation}: { ${owner.via.field}: callerId } }`
+    : '';
+
+  // Resolves the caller and refuses anonymous requests. Emitted at the top of every handler
+  // for an owned model, before anything touches the database.
+  const callerGuard = owner
+    ? `\n    const callerId = ${callerExport}(req);\n    if (!callerId) return jsonError(401, 'Authentication required');`
+    : '';
+
+  // `req`-first for owned models: get/update/delete need the request to identify the caller,
+  // and putting it first keeps one consistent shape across all five handlers. Models with no
+  // owner rule keep their original signatures untouched.
   const listSignature = t
     ? `list${modelName}s(req: Request, lang: string)`
     : localization
@@ -1049,11 +1080,17 @@ function omitSensitive<T extends Record<string, any>>(obj: T): Partial<T> {
       : '';
   const listData = t || localization ? 'localizedData' : 'data';
 
-  const getSignature = t
-    ? `get${modelName}(id: string, lang: string)`
-    : localization
-      ? `get${modelName}(id: string, lang?: string)`
-      : `get${modelName}(id: string)`;
+  const getSignature = owner
+    ? t
+      ? `get${modelName}(req: Request, id: string, lang: string)`
+      : localization
+        ? `get${modelName}(req: Request, id: string, lang?: string)`
+        : `get${modelName}(req: Request, id: string)`
+    : t
+      ? `get${modelName}(id: string, lang: string)`
+      : localization
+        ? `get${modelName}(id: string, lang?: string)`
+        : `get${modelName}(id: string)`;
   const getGuard = t ? `\n    if (!lang) return jsonError(400, "'lang' is required to fetch a ${modelName}");` : '';
   const getInclude = t ? `,\n      include: { ${t.relationName}: { where: { languageCode: lang } } }` : '';
   const localizeGet = t
@@ -1062,6 +1099,22 @@ function omitSensitive<T extends Record<string, any>>(obj: T): Partial<T> {
       ? `\n    const localizedData = lang ? await ${localizeExport}(data, '${modelName}', lang) : data;`
       : '';
   const getData = t || localization ? 'localizedData' : 'data';
+
+  // Create is where ownership is established rather than checked. A direct rule overwrites the
+  // owner column with the caller, so a forged body cannot assign the row to someone else. An
+  // indirect rule cannot use a relation filter (the row does not exist yet), so the parent is
+  // fetched and checked first.
+  const createOwnerPrelude = owner
+    ? 'field' in owner
+      ? `    (input as any).${owner.field} = callerId;\n`
+      : `    const parentId = (input as any).${owner.via.foreignKey};
+    if (!parentId) return jsonError(400, "'${owner.via.foreignKey}' is required");
+    const parent = await (prisma as any).${toCamelCase(owner.via.model)}.findFirst({
+      where: { id: parentId, ${owner.via.field}: callerId },
+      select: { id: true },
+    });
+    if (!parent) return jsonError(404, '${owner.via.model} not found');\n`
+    : '';
 
   const createLogic = t
     ? `    const { lang, ${t.fields.join(', ')}, ...baseInput } = input as any;
@@ -1104,6 +1157,17 @@ function omitSensitive<T extends Record<string, any>>(obj: T): Partial<T> {
     if (idError) return jsonError(400, idError);
     const data = await (prisma as any).${camelCase}.update({ where: { id }, data: input });`;
 
+  // Update and delete check ownership first, then run the original unscoped mutation by id.
+  // A pre-check rather than `updateMany`/`deleteMany` keeps the translation upsert logic and
+  // the returned row intact; the two statements are only meaningfully racy against a
+  // simultaneous change of ownership, which this data model has no operation for.
+  // Reported as 404, not 403, so the endpoint never confirms that someone else's row exists.
+  const ownershipPreCheck = owner
+    ? `    const owned = await (prisma as any).${camelCase}.findFirst({ where: { id, ...${ownerWhere} }, select: { id: true } });
+    if (!owned) return jsonError(404, '${modelName} not found');
+`
+    : '';
+
   const flattenTranslationFn = t
     ? `
 function flattenTranslation(entity: any, relationName: string, fields: string[]): any {
@@ -1122,7 +1186,7 @@ function flattenTranslation(entity: any, relationName: string, fields: string[])
  */
 
 import prisma from '${config.prismaClientPath}';
-${localizationImport}
+${localizationImport}${ownershipImport}
 function isValidUUID(id: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
 }
@@ -1140,7 +1204,7 @@ function validateInputIDs(input: any): string | null {
 }
 ${omitSensitiveFn}${flattenTranslationFn}
 export async function ${listSignature}: Promise<Response> {
-  try {${listGuard}
+  try {${listGuard}${callerGuard}
     const url = new URL(req.url);
 
     const limitParam = url.searchParams.get('limit');
@@ -1160,7 +1224,7 @@ export async function ${listSignature}: Promise<Response> {
     }
 
     ${filterLogic}
-
+${owner ? `\n    // Applied after filter parsing so no \`filter.*\` parameter can widen the scope.\n    Object.assign(where, ${ownerWhere});\n` : ''}
     const [data, total] = await Promise.all([
       (prisma as any).${camelCase}.findMany({
         where,
@@ -1181,9 +1245,9 @@ ${localizeList}
 }
 
 export async function ${getSignature}: Promise<Response> {
-  try {${getGuard}
+  try {${getGuard}${callerGuard}
     if (!isValidUUID(id)) return jsonError(400, 'Invalid ID format - must be a valid UUID');
-    const data = await (prisma as any).${camelCase}.findUnique({ where: { id }${getInclude} });
+    const data = await (prisma as any).${camelCase}.${owner ? 'findFirst' : 'findUnique'}({ where: { id${owner ? `, ...${ownerWhere}` : ''} }${getInclude} });
     if (!data) return jsonError(404, '${modelName} not found');
 ${localizeGet}
     return new Response(JSON.stringify(${hasSensitive ? `omitSensitive(${getData})` : getData}), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -1193,30 +1257,30 @@ ${localizeGet}
 }
 
 export async function create${modelName}(req: Request): Promise<Response> {
-  try {
+  try {${callerGuard}
     ${inputParseLine}
-${createLogic}
+${createOwnerPrelude}${createLogic}
     return new Response(JSON.stringify(${hasSensitive ? 'omitSensitive(data)' : 'data'}), { status: 201, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(400, (error as Error).message);
   }
 }
 
-export async function update${modelName}(id: string, req: Request): Promise<Response> {
-  try {
+export async function update${modelName}(${owner ? 'req: Request, id: string' : 'id: string, req: Request'}): Promise<Response> {
+  try {${callerGuard}
     if (!isValidUUID(id)) return jsonError(400, 'Invalid ID format - must be a valid UUID');
-    ${inputParseLine}
-${updateLogic}
+${ownershipPreCheck}    ${inputParseLine}
+${owner && 'field' in owner ? `    delete (input as any).${owner.field};\n` : ''}${updateLogic}
     return new Response(JSON.stringify(${hasSensitive ? 'omitSensitive(data)' : 'data'}), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(400, (error as Error).message);
   }
 }
 
-export async function delete${modelName}(id: string): Promise<Response> {
-  try {
+export async function delete${modelName}(${owner ? 'req: Request, id: string' : 'id: string'}): Promise<Response> {
+  try {${callerGuard}
     if (!isValidUUID(id)) return jsonError(400, 'Invalid ID format - must be a valid UUID');
-    const data = await (prisma as any).${camelCase}.delete({ where: { id } });
+${ownershipPreCheck}    const data = await (prisma as any).${camelCase}.delete({ where: { id } });
     return new Response(JSON.stringify(${hasSensitive ? 'omitSensitive(data)' : 'data'}), { status: 200, headers: { 'Content-Type': 'application/json' } });
   } catch (error) {
     return jsonError(500, (error as Error).message);
@@ -1325,12 +1389,18 @@ export function generateRestRouterContent(models: Model[], config: RestRouterCon
             : ''
           : ', lang'
         : '';
+      // An owned model's handlers take `req` first, because they need it to identify the
+      // caller. Mirrors the signatures generateRestHandlerContent emits for the same metadata.
+      const owned = Boolean(metadataByModel?.[m.name]?.owner);
+      const getArgs = owned ? `req, id${langArg}` : `id${langArg}`;
+      const updateArgs = owned ? 'req, id' : 'id, req';
+      const deleteArgs = owned ? 'req, id' : 'id';
       return `    if (entity === '${plural}') {
       if (method === 'GET' && !id) return await ${camel}Rest.list${m.name}s(req${langArg});
-      if (method === 'GET' && id) return await ${camel}Rest.get${m.name}(id${langArg});
+      if (method === 'GET' && id) return await ${camel}Rest.get${m.name}(${getArgs});
       if (method === 'POST') return await ${camel}Rest.create${m.name}(req);
-      if (method === 'PUT' && id) return await ${camel}Rest.update${m.name}(id, req);
-      if (method === 'DELETE' && id) return await ${camel}Rest.delete${m.name}(id);
+      if (method === 'PUT' && id) return await ${camel}Rest.update${m.name}(${updateArgs});
+      if (method === 'DELETE' && id) return await ${camel}Rest.delete${m.name}(${deleteArgs});
     }`;
     })
     .join('\n\n');

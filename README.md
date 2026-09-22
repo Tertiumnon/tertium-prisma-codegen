@@ -174,6 +174,55 @@ Then in `package.json`:
 }
 ```
 
+## Per-caller ownership
+
+Generated CRUD is unscoped by default, which suits shared reference content but not
+per-user data: without scoping, any caller can read and modify any row. Declare an
+`owner` rule on a model and every generated query is constrained to the calling user.
+
+```ts
+// metadata, per model
+const metadata = {
+  // the owning user's id is a column on this model
+  Character: { orderBy: 'name', owner: { field: 'ownerId' } },
+
+  // owned through a relation: a PartyEvent belongs to whoever owns its Party
+  PartyEvent: {
+    orderBy: 'occurredAt',
+    owner: { via: { relation: 'party', foreignKey: 'partyId', model: 'Party', field: 'dmUserId' } },
+  },
+
+  // no rule: unscoped, generated exactly as before
+  Item: { orderBy: 'name' },
+};
+
+// generator config, telling it how to identify the caller
+generateRestHandlerContent('Character', metadata.Character, {
+  prismaClientPath: '../../db/prisma.client',
+  ownership: {
+    callerImport: '../../auth/verify-jwt',
+    callerExport: 'callerIdFromRequest', // (req: Request) => string | null
+  },
+});
+```
+
+What the generated handlers then do:
+
+| Operation | Behaviour |
+|---|---|
+| list | `401` if anonymous; owner filter merged into `where` **after** `filter.*` parsing, so no query parameter can widen it |
+| get | `findFirst` scoped to the owner; a row owned by someone else answers `404`, not `403`, so the endpoint never confirms it exists |
+| create | a direct rule forces the owner column to the caller; a `via` rule fetches and checks the parent first |
+| update / delete | ownership pre-check, then the normal mutation. A direct rule also strips the owner column from the body, so ownership cannot be transferred |
+
+Handlers for an owned model take `req` first (`get(req, id)`, `update(req, id)`,
+`delete(req, id)`) because they need it to identify the caller.
+`generateRestRouterContent` emits the matching call when given `metadataByModel`.
+
+Both halves are required. A model carrying an `owner` rule with no `ownership` config
+throws at generation time rather than emitting an unguarded handler for data that asked
+to be guarded. Models without a rule generate byte-identical output to before.
+
 ## Library structure
 
 The library uses **direct imports only** — no central barrel files.

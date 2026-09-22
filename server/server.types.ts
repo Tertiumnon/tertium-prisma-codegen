@@ -35,6 +35,29 @@ export type IncludeRelation = {
   targetTranslation?: TranslationMetadata;
 };
 
+/**
+ * How a row's owning user is determined, for generators that scope queries to the caller.
+ *
+ * Reference data (a creature template, an item) has no owner and omits this entirely.
+ * Per-user data (a player's character, a party's campaign log) declares one, and every
+ * generated query is then constrained to rows the caller owns.
+ */
+export type OwnershipRule =
+  /**
+   * The owning user's id is a column on this model, e.g. `{ field: 'ownerId' }` on a Character.
+   */
+  | { field: string }
+  /**
+   * The row is owned through a relation rather than directly. A PartyEvent, for example,
+   * belongs to whoever owns its Party:
+   * `{ via: { relation: 'party', foreignKey: 'partyId', model: 'Party', field: 'dmUserId' } }`
+   *
+   * `relation` and `field` build the Prisma filter (`{ party: { dmUserId: caller } }`).
+   * `model` and `foreignKey` let create validate the parent before inserting, since a
+   * relation filter cannot apply to a row that does not exist yet.
+   */
+  | { via: { relation: string; foreignKey: string; model: string; field: string } };
+
 export type EntityMetadata = {
   filterable?: Record<string, FilterMode>;
   searchableFields?: string[];
@@ -42,6 +65,14 @@ export type EntityMetadata = {
   orderBy?: string;
   /** Set when this model has a detected `<Model>Translation` relation - see TranslationMetadata. */
   translation?: TranslationMetadata;
+  /**
+   * Scopes every generated query for this model to the calling user. Requires the matching
+   * `ownership` config on the generator (see `RestHandlerConfig.ownership`); without it the
+   * rule is ignored, so metadata alone can never half-apply a guard.
+   *
+   * Opt-in per model: a model without this generates exactly what it did before.
+   */
+  owner?: OwnershipRule;
 };
 
 // ── Generator option/config types ─────────────────────────────────────────────
@@ -101,11 +132,28 @@ export type GraphQLResolverConfig = {
   caseInsensitiveSearch?: boolean;
 };
 
+export type OwnershipConfig = {
+  /** Module exporting the caller resolver, relative to the generated handler file. */
+  callerImport: string;
+  /**
+   * Named export taking the `Request` and returning the calling user's id, or null when the
+   * request is unauthenticated. Defaults to `callerIdFromRequest`.
+   */
+  callerExport?: string;
+};
+
 export type RestHandlerConfig = {
   prismaClientPath: string;
   localization?: LocalizationConfig;
   /** See `GraphQLResolverConfig.caseInsensitiveSearch` - same meaning, REST twin. */
   caseInsensitiveSearch?: boolean;
+  /**
+   * Enables per-caller scoping for models whose metadata carries an `owner` rule. Both halves
+   * are required: a model with an `owner` rule but no `ownership` config here generates
+   * unscoped handlers, so this is checked at generation time and throws rather than silently
+   * emitting an unguarded handler for data that asked to be guarded.
+   */
+  ownership?: OwnershipConfig;
   /**
    * Field names (matched globally, across every model) stripped from every REST response
    * (list/get) and from create/update request bodies before they reach Prisma - e.g. a password

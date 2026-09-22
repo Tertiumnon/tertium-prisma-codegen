@@ -993,3 +993,143 @@ describe('generateGraphQLResolversContent - relation pointing at a translation-t
     );
   });
 });
+
+// ── ownership scoping ─────────────────────────────────────────────────────────
+
+const OWNERSHIP = { callerImport: '../../auth/verify-jwt', callerExport: 'callerIdFromRequest' };
+
+describe('generateRestHandlerContent with ownership', () => {
+  describe('a model with no owner rule', () => {
+    const plain = generateRestHandlerContent('Author', handlerMetadata, { prismaClientPath: REST_PRISMA_PATH });
+    const withConfigButNoRule = generateRestHandlerContent('Author', handlerMetadata, {
+      prismaClientPath: REST_PRISMA_PATH,
+      ownership: OWNERSHIP,
+    });
+
+    it('is unchanged by an ownership config it does not opt into', () => {
+      expect(withConfigButNoRule).toBe(plain);
+    });
+
+    it('does not import the caller resolver', () => {
+      expect(withConfigButNoRule).not.toContain('callerIdFromRequest');
+    });
+  });
+
+  it('refuses to generate an unguarded handler for a model that asked to be guarded', () => {
+    expect(() =>
+      generateRestHandlerContent('Character', { ...handlerMetadata, owner: { field: 'ownerId' } }, {
+        prismaClientPath: REST_PRISMA_PATH,
+      }),
+    ).toThrow(/declares an `owner` rule but no `ownership` config/);
+  });
+
+  describe('direct ownership', () => {
+    const output = generateRestHandlerContent(
+      'Character',
+      { ...handlerMetadata, owner: { field: 'ownerId' } },
+      { prismaClientPath: REST_PRISMA_PATH, ownership: OWNERSHIP },
+    );
+
+    it('imports the caller resolver', () => {
+      expect(output).toContain("import { callerIdFromRequest } from '../../auth/verify-jwt';");
+    });
+
+    it('refuses anonymous requests before touching the database', () => {
+      expect(output).toContain("const callerId = callerIdFromRequest(req);");
+      expect(output).toContain("if (!callerId) return jsonError(401, 'Authentication required');");
+    });
+
+    it('scopes list to the caller AFTER filter parsing, so filter.* cannot widen it', () => {
+      const listBlock = output.slice(output.indexOf('export async function listCharacters'), output.indexOf('export async function getCharacter'));
+      const filterIndex = listBlock.indexOf('const filterPrefix');
+      const scopeIndex = listBlock.indexOf('Object.assign(where, { ownerId: callerId })');
+      expect(scopeIndex).toBeGreaterThan(filterIndex);
+    });
+
+    it('reads a single row with findFirst plus the owner scope, not a bare findUnique', () => {
+      expect(output).toContain('findFirst({ where: { id, ...{ ownerId: callerId } }');
+      expect(output).not.toContain('findUnique({ where: { id }');
+    });
+
+    it('reports a row owned by someone else as 404, not 403', () => {
+      expect(output).toContain("return jsonError(404, 'Character not found')");
+      expect(output).not.toContain('403');
+    });
+
+    it('forces the owner column on create so a forged body cannot reassign the row', () => {
+      expect(output).toContain('(input as any).ownerId = callerId;');
+    });
+
+    it('strips the owner column on update so ownership cannot be transferred', () => {
+      expect(output).toContain('delete (input as any).ownerId;');
+    });
+
+    it('checks ownership before update and delete', () => {
+      const checks = output.split("const owned = await (prisma as any).character.findFirst({ where: { id, ...{ ownerId: callerId } }, select: { id: true } });").length - 1;
+      expect(checks).toBe(2);
+    });
+
+    it('takes req first on get, update and delete', () => {
+      expect(output).toContain('export async function getCharacter(req: Request, id: string)');
+      expect(output).toContain('export async function updateCharacter(req: Request, id: string)');
+      expect(output).toContain('export async function deleteCharacter(req: Request, id: string)');
+    });
+  });
+
+  describe('indirect ownership through a relation', () => {
+    const output = generateRestHandlerContent(
+      'PartyEvent',
+      {
+        ...handlerMetadata,
+        owner: { via: { relation: 'party', foreignKey: 'partyId', model: 'Party', field: 'dmUserId' } },
+      },
+      { prismaClientPath: REST_PRISMA_PATH, ownership: OWNERSHIP },
+    );
+
+    it('scopes list through a nested relation filter', () => {
+      expect(output).toContain('Object.assign(where, { party: { dmUserId: callerId } })');
+    });
+
+    it('scopes get through the same nested filter', () => {
+      expect(output).toContain('findFirst({ where: { id, ...{ party: { dmUserId: callerId } } }');
+    });
+
+    it('validates the parent before create, since a relation filter cannot match a row that does not exist yet', () => {
+      expect(output).toContain("const parentId = (input as any).partyId;");
+      expect(output).toContain("if (!parentId) return jsonError(400, \"'partyId' is required\");");
+      expect(output).toContain('prisma as any).party.findFirst({');
+      expect(output).toContain('where: { id: parentId, dmUserId: callerId },');
+      expect(output).toContain("if (!parent) return jsonError(404, 'Party not found');");
+    });
+
+    it('does not try to delete an owner column that lives on the parent', () => {
+      expect(output).not.toContain('delete (input as any).dmUserId;');
+    });
+  });
+});
+
+describe('generateRestRouterContent with ownership', () => {
+  const ownedModels = [
+    { name: 'Character', fields: [] },
+    { name: 'Author', fields: [] },
+  ] as any;
+  const output = generateRestRouterContent(ownedModels, {
+    entityImportBase: '../../entities',
+    metadataByModel: {
+      Character: { ...handlerMetadata, owner: { field: 'ownerId' } },
+      Author: handlerMetadata,
+    },
+  });
+
+  it('passes req first to an owned model handler', () => {
+    expect(output).toContain('characterRest.getCharacter(req, id)');
+    expect(output).toContain('characterRest.updateCharacter(req, id)');
+    expect(output).toContain('characterRest.deleteCharacter(req, id)');
+  });
+
+  it('leaves an unowned model calling convention untouched', () => {
+    expect(output).toContain('authorRest.getAuthor(id)');
+    expect(output).toContain('authorRest.updateAuthor(id, req)');
+    expect(output).toContain('authorRest.deleteAuthor(id)');
+  });
+});
