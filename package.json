@@ -3,6 +3,10 @@
   "version": "0.9.0",
   "description": "[IN DEVELOPMENT, not a final API] Universal Prisma schema code generation — REST handlers, GraphQL resolvers, TypeScript types.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Tertiumnon/tertium-prisma-codegen"
+  },
   "exports": {
     "./dmmf/types": "./dmmf/dmmf.types.ts",
     "./dmmf/utils": "./dmmf/dmmf.utils.ts",
