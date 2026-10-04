@@ -7,6 +7,8 @@ export type DMMFField = {
   kind: 'scalar' | 'object' | 'enum' | 'unsupported';
   type: string;
   isRequired: boolean;
+  /** True when the database fills the field itself (@default, @updatedAt), so a write may omit it. */
+  hasDefaultValue?: boolean;
   isList: boolean;
   isId: boolean;
   relationName?: string;
@@ -49,6 +51,11 @@ export type TranslationMetadata = {
    * logic should fall back to matching every field in `fields`.
    */
   searchableFields?: string[];
+  /**
+   * Subset of `fields` a new translation row cannot be created without (required, no default) -
+   * an update missing one of them can only change an existing row, never create it.
+   */
+  requiredFields?: string[];
 };
 
 // ── EntityMeta types (served by /entities, consumed by frontend generator) ───

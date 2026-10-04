@@ -680,6 +680,8 @@ describe('inferEntityMetadata - translation-table detection', () => {
       // searchableFieldPatterns: [/name/i] matches neither 'title' nor 'summary' - see the
       // 'falls back to every translation field' test below for the resulting search behavior.
       searchableFields: [],
+      // title is required with no default; summary is optional.
+      requiredFields: ['title'],
     });
   });
 
@@ -744,11 +746,13 @@ describe('generateGraphQLResolversContent - translation-table entities', () => {
     expect(createBlock).toContain('translations: { create: { languageCode: lang, title, summary } },');
   });
 
-  it('update upserts the translation row on the fk_languageCode compound unique', () => {
+  it('update writes the translation row through translationWrite on the fk_languageCode compound unique', () => {
     const updateBlock = output.slice(output.indexOf('updateBook:'), output.indexOf('deleteBook:'));
-    expect(updateBlock).toContain('where: { bookId_languageCode: { bookId: id, languageCode: lang } },');
-    expect(updateBlock).toContain('create: { languageCode: lang, title, summary },');
-    expect(updateBlock).toContain('update: { title, summary },');
+    expect(updateBlock).toContain('translations: translationWrite(');
+    expect(updateBlock).toContain('{ bookId_languageCode: { bookId: id, languageCode: lang } },');
+    expect(updateBlock).toContain('{ title, summary },');
+    expect(updateBlock).toContain('["title"],');
+    expect(output).toContain('function translationWrite(');
   });
 });
 
@@ -800,9 +804,49 @@ describe('generateRestHandlerContent - translation-table entities', () => {
     );
   });
 
-  it('create/update write a nested translation row via upsert on the compound unique key', () => {
+  it('create/update write a nested translation row, update via translationWrite on the compound unique key', () => {
     expect(output).toContain('translations: { create: { languageCode: lang, title, summary } },');
-    expect(output).toContain('where: { bookId_languageCode: { bookId: id, languageCode: lang } },');
+    expect(output).toContain('{ bookId_languageCode: { bookId: id, languageCode: lang } },');
+    expect(output).toContain('translations: translationWrite(');
+  });
+});
+
+describe('translationWrite - the update helper emitted into translated handlers', () => {
+  // Regression coverage for a real bug: update always upserted with every translatable field, so
+  // an update leaving out a required field (renaming the base row, changing a link) failed in
+  // Prisma with a misleading "Argument `language` is missing" - the create branch could not be valid.
+  const output = generateRestHandlerContent('Book', translationMetadata.Book!, { prismaClientPath: REST_PRISMA_PATH });
+  const start = output.indexOf('function translationWrite(');
+  const source = output.slice(start, output.indexOf('\n}\n', start) + 2);
+  const js = new Bun.Transpiler({ loader: 'ts', deadCodeElimination: false }).transformSync(source);
+  const translationWrite = new Function(`${js}\nreturn translationWrite;`)() as (
+    where: Record<string, unknown>,
+    lang: string,
+    values: Record<string, unknown>,
+    required: string[],
+  ) => unknown;
+  const where = { bookId_languageCode: { bookId: 'b', languageCode: 'en' } };
+
+  it('upserts when every required field is given', () => {
+    expect(translationWrite(where, 'en', { title: 'T', summary: undefined }, ['title'])).toEqual({
+      upsert: { where, create: { languageCode: 'en', title: 'T' }, update: { title: 'T' } },
+    });
+  });
+
+  it('only updates an existing row when a required field is missing', () => {
+    expect(translationWrite(where, 'en', { title: undefined, summary: 'S' }, ['title'])).toEqual({
+      updateMany: { where: { languageCode: 'en' }, data: { summary: 'S' } },
+    });
+  });
+
+  it('treats null as missing for a required field, but writes it to an optional one', () => {
+    expect(translationWrite(where, 'en', { title: null, summary: null }, ['title'])).toEqual({
+      updateMany: { where: { languageCode: 'en' }, data: { title: null, summary: null } },
+    });
+  });
+
+  it('leaves the translation alone when no translatable field is given', () => {
+    expect(translationWrite(where, 'en', { title: undefined, summary: undefined }, ['title'])).toBeUndefined();
   });
 });
 
@@ -960,6 +1004,7 @@ describe('inferEntityMetadata - relation pointing at a translation-table entity'
           translationModelName: 'BookTranslation',
           fkFieldName: 'bookId',
           fields: ['title', 'summary'],
+          requiredFields: ['title'],
         },
       },
     ]);

@@ -144,12 +144,14 @@ export function detectTranslationRelations(
     if (!relationField) continue;
 
     const excluded = new Set(['id', fkFieldName, 'languageCode', 'createdAt', 'updatedAt']);
-    const fields = translationModel.fields
-      .filter((f) => f.kind === 'scalar' && f.type === 'String' && !excluded.has(f.name))
-      .map((f) => f.name);
+    const translatable = translationModel.fields.filter(
+      (f) => f.kind === 'scalar' && f.type === 'String' && !excluded.has(f.name),
+    );
+    const fields = translatable.map((f) => f.name);
     if (fields.length === 0) continue;
+    const requiredFields = translatable.filter((f) => f.isRequired && !f.hasDefaultValue).map((f) => f.name);
 
-    result.set(model.name, { relationName: relationField.name, translationModelName, fkFieldName, fields });
+    result.set(model.name, { relationName: relationField.name, translationModelName, fkFieldName, fields, requiredFields });
   }
 
   return result;

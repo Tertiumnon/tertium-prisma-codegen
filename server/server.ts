@@ -251,7 +251,7 @@ export type EntityMetadata = {
   searchableFields?: string[];
   includeRelations?: { name: string; targetTranslation?: { relationName: string; translationModelName: string; fkFieldName: string; fields: string[]; searchableFields?: string[] } }[];
   orderBy?: string;
-  translation?: { relationName: string; translationModelName: string; fkFieldName: string; fields: string[]; searchableFields?: string[] };
+  translation?: { relationName: string; translationModelName: string; fkFieldName: string; fields: string[]; searchableFields?: string[]; requiredFields?: string[] };
 };
 
 export const GRAPHQL_ENTITY_METADATA: Record<string, EntityMetadata> = ${JSON.stringify(metadata, null, 2)};
@@ -342,6 +342,14 @@ export function generateGraphQLResolversContent(
   const t = Array.isArray(translations) ? translations[0] : undefined;
   for (const f of fields) rest[f] = t ? (t[f] ?? null) : null;
   return rest;
+}
+
+function translationWrite(where: Record<string, unknown>, lang: string, values: Record<string, unknown>, required: string[]): any {
+  const given = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
+  if (Object.keys(given).length === 0) return undefined;
+  // A missing row can be created only with every required field; otherwise only an existing row changes.
+  if (required.every((f) => given[f] != null)) return { upsert: { where, create: { languageCode: lang, ...given }, update: given } };
+  return { updateMany: { where: { languageCode: lang }, data: given } };
 }
 `
     : '';
@@ -790,13 +798,12 @@ function _buildUpdateResolver(modelName: string, metadata: EntityMetadata, fkFie
           where: { id },
           data: {
             ...${baseData},
-            ${t.relationName}: {
-              upsert: {
-                where: { ${t.fkFieldName}_languageCode: { ${t.fkFieldName}: id, languageCode: lang } },
-                create: { languageCode: lang, ${translatableAssignments} },
-                update: { ${translatableAssignments} },
-              },
-            },
+            ${t.relationName}: translationWrite(
+              { ${t.fkFieldName}_languageCode: { ${t.fkFieldName}: id, languageCode: lang } },
+              lang,
+              { ${translatableAssignments} },
+              ${JSON.stringify(t.requiredFields ?? [])},
+            ),
           },
           ${includeLogic}
         });${nestedFlattenBlock}
@@ -1142,13 +1149,12 @@ function omitSensitive<T extends Record<string, any>>(obj: T): Partial<T> {
       where: { id },
       data: {
         ...baseInput,
-        ${t.relationName}: {
-          upsert: {
-            where: { ${t.fkFieldName}_languageCode: { ${t.fkFieldName}: id, languageCode: lang } },
-            create: { languageCode: lang, ${t.fields.join(', ')} },
-            update: { ${t.fields.join(', ')} },
-          },
-        },
+        ${t.relationName}: translationWrite(
+          { ${t.fkFieldName}_languageCode: { ${t.fkFieldName}: id, languageCode: lang } },
+          lang,
+          { ${t.fields.join(', ')} },
+          ${JSON.stringify(t.requiredFields ?? [])},
+        ),
       },
       include: { ${t.relationName}: { where: { languageCode: lang } } },
     });
@@ -1176,6 +1182,14 @@ function flattenTranslation(entity: any, relationName: string, fields: string[])
   const t = Array.isArray(translations) ? translations[0] : undefined;
   for (const f of fields) rest[f] = t ? (t[f] ?? null) : null;
   return rest;
+}
+
+function translationWrite(where: Record<string, unknown>, lang: string, values: Record<string, unknown>, required: string[]): any {
+  const given = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== undefined));
+  if (Object.keys(given).length === 0) return undefined;
+  // A missing row can be created only with every required field; otherwise only an existing row changes.
+  if (required.every((f) => given[f] != null)) return { upsert: { where, create: { languageCode: lang, ...given }, update: given } };
+  return { updateMany: { where: { languageCode: lang }, data: given } };
 }
 `
     : '';
