@@ -40,7 +40,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
-    "@tertium/js": "^3.0.0",
+    "@tertium/js": "^3.1.1",
     "@types/bun": "^1.3.9",
     "typescript": "^5.8.3"
   }

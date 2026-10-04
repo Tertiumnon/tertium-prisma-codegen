@@ -6,7 +6,7 @@
       "name": "@tertium/prisma-codegen",
       "devDependencies": {
         "@biomejs/biome": "^2.5.14",
-        "@tertium/js": "^3.0.0",
+        "@tertium/js": "^3.1.1",
         "@types/bun": "^1.3.9",
         "typescript": "^5.8.3",
       },
@@ -31,7 +31,7 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.14", "", { "os": "win32", "cpu": "x64" }, "sha512-oJWmBhoHsnhUKIke+0gXDX0mltJrWHA1UyHsrTlXwX0TL64ilVZAo+TYZm97baecV0esBdpzy3k96q+09JaZUQ=="],
 
-    "@tertium/js": ["@tertium/js@3.0.0", "", { "peerDependencies": { "jose": "^6.0.0" }, "optionalPeers": ["jose"] }, "sha512-SY6pwaAkVPgQjCIpyKvSECAaZ8TL1K+cqXxnM1HUg2M2Lz5Njnika8AkYH99JNZZnb8KDmT/4cawGDpxEK6lfA=="],
+    "@tertium/js": ["@tertium/js@3.1.1", "", { "peerDependencies": { "jose": "^6.0.0" }, "optionalPeers": ["jose"] }, "sha512-Pj8dr7J8l95bYqk7z5yKbZ07skE/aAb7Aj0vgA6GZk70NJ2ktk0wiIRD21GlTMwEyRkmcD7WrBj9HtpJHaBO6g=="],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
