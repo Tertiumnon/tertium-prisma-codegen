@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import {
   generateEntityTypesContent,
+  generateGraphQLMetadataFileContent,
   generateGraphQLResolversContent,
   generateGraphQLSchemaContent,
   generateRestHandlerContent,
@@ -1008,6 +1009,27 @@ describe('inferEntityMetadata - relation pointing at a translation-table entity'
         },
       },
     ]);
+  });
+});
+
+describe('generateGraphQLMetadataFileContent - declared types match the emitted data', () => {
+  // Regression coverage for a real bug: the file declared the translation shape twice, inline, and
+  // only one copy learned `requiredFields` - every consumer's typecheck then failed on the data.
+  const output = generateGraphQLMetadataFileContent(nestedTranslationMetadata);
+  const typeBlock = output.slice(output.indexOf('export type TranslationMetadata = {'), output.indexOf('export type EntityMetadata'));
+
+  it('declares the translation shape once and uses it for both places that hold it', () => {
+    expect(output).toContain('includeRelations?: { name: string; targetTranslation?: TranslationMetadata }[];');
+    expect(output).toContain('translation?: TranslationMetadata;');
+  });
+
+  it('declares every key the translation metadata actually carries', () => {
+    const emitted = [
+      ...Object.values(nestedTranslationMetadata).flatMap((m) => (m.translation ? [m.translation] : [])),
+      ...Object.values(nestedTranslationMetadata).flatMap((m) => (m.includeRelations ?? []).flatMap((r) => (r.targetTranslation ? [r.targetTranslation] : []))),
+    ];
+    expect(emitted.length).toBeGreaterThan(0);
+    for (const key of new Set(emitted.flatMap((t) => Object.keys(t)))) expect(typeBlock).toContain(`  ${key}`);
   });
 });
 

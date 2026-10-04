@@ -246,12 +246,21 @@ export function generateGraphQLMetadataFileContent(metadata: Record<string, Enti
  * DO NOT EDIT - regenerate with your codegen script
  */
 
+export type TranslationMetadata = {
+  relationName: string;
+  translationModelName: string;
+  fkFieldName: string;
+  fields: string[];
+  searchableFields?: string[];
+  requiredFields?: string[];
+};
+
 export type EntityMetadata = {
   filterable?: Record<string, 'contains' | 'equals'>;
   searchableFields?: string[];
-  includeRelations?: { name: string; targetTranslation?: { relationName: string; translationModelName: string; fkFieldName: string; fields: string[]; searchableFields?: string[] } }[];
+  includeRelations?: { name: string; targetTranslation?: TranslationMetadata }[];
   orderBy?: string;
-  translation?: { relationName: string; translationModelName: string; fkFieldName: string; fields: string[]; searchableFields?: string[]; requiredFields?: string[] };
+  translation?: TranslationMetadata;
 };
 
 export const GRAPHQL_ENTITY_METADATA: Record<string, EntityMetadata> = ${JSON.stringify(metadata, null, 2)};
