@@ -69,6 +69,7 @@ function _mapDMMFField(f: DMMFField): Field {
     required: f.isRequired,
     isId: f.isId,
     isRelation: f.kind === 'object',
+    isEnum: f.kind === 'enum',
     isArray: f.isList,
   };
 }
@@ -195,10 +196,16 @@ export function generateEntityTypesContent(
   const skipInputFields = options.skipInputFields ? new Set(options.skipInputFields) : DEFAULT_SKIP_INPUT_FIELDS;
   const sensitiveFields = new Set(options.sensitiveFields ?? []);
   const relationImportPath = options.relationImportPath ?? ((name: string) => `../${toKebabCase(name)}/${toKebabCase(name)}.types.auto`);
+  const enumImportPath = options.enumImportPath ?? '@prisma/client';
   const t = allMetadata[model.name]?.translation;
   // Filtered up front so a sensitive field is invisible to both the read type
   // (mainFields) and the input type (inputFields) below, not just one of them.
   const scalarFields = model.fields.filter((f) => !f.isRelation && !sensitiveFields.has(f.name));
+  const enumNames = [...new Set(scalarFields.filter((f) => f.isEnum).map((f) => f.type))].sort();
+  const fieldType = (field: Field) => {
+    const type = field.isEnum ? field.type : prismaToTsType(field.type);
+    return field.isArray ? `${type}[]` : type;
+  };
   // Exclude this model's own translation relation (handled by flattening below) AND any relation
   // to a `<Model>Translation` table from ANOTHER model's side (e.g. `Language.creatureTranslations`)
   // - a translation model is never a first-class entity anywhere, so it never gets its own
@@ -208,7 +215,7 @@ export function generateEntityTypesContent(
   );
 
   const mainFields = [
-    ...scalarFields.map((f) => `  ${f.name}${f.required ? '' : '?'}: ${prismaToTsType(f.type)};`),
+    ...scalarFields.map((f) => `  ${f.name}${f.required ? '' : '?'}: ${fieldType(f)};`),
     ...(t ? t.fields.map((name) => `  ${name}?: string;`) : []),
     ...relationFields.map((f) =>
       f.isArray ? `  ${f.name}${f.required ? '' : '?'}: ${f.type}[];` : `  ${f.name}${f.required ? '' : '?'}: ${f.type} | null;`,
@@ -216,12 +223,15 @@ export function generateEntityTypesContent(
   ].join('\n');
 
   const inputFields = [
-    ...scalarFields.filter((f) => !skipInputFields.has(f.name)).map((f) => `  ${f.name}${f.required ? '' : '?'}: ${prismaToTsType(f.type)};`),
+    ...scalarFields.filter((f) => !skipInputFields.has(f.name)).map((f) => `  ${f.name}${f.required ? '' : '?'}: ${fieldType(f)};`),
     ...(t ? [`  lang: string;`, ...t.fields.map((name) => `  ${name}?: string;`)] : []),
   ].join('\n');
 
   const relatedTypeNames = Array.from(new Set(relationFields.map((f) => f.type))).filter((name) => name !== model.name);
-  const imports = relatedTypeNames.map((name) => `import type { ${name} } from '${relationImportPath(name)}';`).join('\n');
+  const imports = [
+    ...relatedTypeNames.map((name) => `import type { ${name} } from '${relationImportPath(name)}';`),
+    ...(enumNames.length ? [`import type { ${enumNames.join(', ')} } from '${enumImportPath}';`] : []),
+  ].join('\n');
 
   return `/**
  * ${model.name} Types

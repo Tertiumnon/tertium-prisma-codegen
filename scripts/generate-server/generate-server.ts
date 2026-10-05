@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
 
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import type { DMMFModel } from '../../dmmf/dmmf.types';
+import { readSchemaDMMF } from '../../dmmf/dmmf.schema';
 import {
   parsePrismaModels,
   toKebabCase,
@@ -36,6 +37,7 @@ function getArgList(name: string, defaultValue: string[] = []): string[] {
 }
 
 const config: ServerGeneratorConfig = {
+  schemaPath: getArg('schema', DEFAULT_CONFIG.schemaPath),
   prismaClientImport: getArg('prisma-client-import', DEFAULT_CONFIG.prismaClientImport),
   prismaSingletonPath: getArg('prisma-singleton-path', DEFAULT_CONFIG.prismaSingletonPath),
   graphqlContextPath: getArg('graphql-context-path', DEFAULT_CONFIG.graphqlContextPath),
@@ -51,7 +53,13 @@ const config: ServerGeneratorConfig = {
   sensitiveFields: getArgList('sensitive-fields', DEFAULT_CONFIG.sensitiveFields),
 };
 
-function getDMMFModels(): DMMFModel[] {
+async function getDMMFModels(): Promise<DMMFModel[]> {
+  if (config.schemaPath) {
+    const dmmf = await readSchemaDMMF(config.schemaPath);
+    return dmmf.datamodel.models;
+  }
+
+  // Retained for projects using the older Prisma Client runtime model.
   const PrismaClient = config.prismaClientImport.startsWith('.')
     ? require(join(process.cwd(), config.prismaClientImport.replace(/^\.\//, ''))).PrismaClient
     : require(config.prismaClientImport).PrismaClient;
@@ -68,7 +76,7 @@ function getDMMFModels(): DMMFModel[] {
 // model that points at one - otherwise e.g. User.RefreshToken would still
 // surface a dangling reference to a type that no longer gets generated.
 const excludeSet = new Set(config.excludeModels);
-const dmmfModels = getDMMFModels()
+const dmmfModels = (await getDMMFModels())
   .filter((model) => !excludeSet.has(model.name))
   .map((model) => ({
     ...model,
@@ -110,7 +118,15 @@ for (const model of models) {
 
   writeFileSync(
     join(dir, `${kebab}.types.auto.ts`),
-    generateEntityTypesContent(model, metadata, { sensitiveFields: config.sensitiveFields }),
+    generateEntityTypesContent(model, metadata, {
+      sensitiveFields: config.sensitiveFields,
+      enumImportPath: config.prismaClientImport.startsWith('.')
+        ? (() => {
+            const path = relative(resolve(dir), resolve(config.prismaClientImport)).replace(/\\/g, '/');
+            return path.startsWith('.') ? path : `./${path}`;
+          })()
+        : config.prismaClientImport,
+    }),
   );
   writeFileSync(
     join(dir, `${kebab}.rest.auto.ts`),

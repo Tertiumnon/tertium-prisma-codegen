@@ -1,4 +1,6 @@
 export interface ServerGeneratorConfig {
+  /** Prisma schema path for full DMMF (required for Prisma 7). Empty uses the legacy runtime model. */
+  schemaPath: string;
   prismaClientImport: string;
   prismaSingletonPath: string;
   graphqlContextPath: string;

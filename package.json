@@ -10,6 +10,7 @@
   "exports": {
     "./dmmf/types": "./dmmf/dmmf.types.ts",
     "./dmmf/utils": "./dmmf/dmmf.utils.ts",
+    "./dmmf/schema": "./dmmf/dmmf.schema.ts",
     "./server": "./server/server.ts",
     "./server/types": "./server/server.types.ts",
     "./client": "./client/client.ts",

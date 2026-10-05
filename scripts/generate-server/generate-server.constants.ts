@@ -1,4 +1,5 @@
 export const DEFAULT_CONFIG = {
+  schemaPath: '',
   prismaClientImport: './generated/prisma/client',
   prismaSingletonPath: '../db/prisma',
   graphqlContextPath: './graphql.context',
@@ -16,6 +17,7 @@ export const DEFAULT_CONFIG = {
 
 export const CLI_ARGS_HELP = `
 Options (all optional with sensible defaults):
+  --schema                       Prisma schema path; use with Prisma 7 (requires @prisma/internals)
   --prisma-client-import         Import path to PrismaClient
   --prisma-singleton-path        Import path to Prisma singleton
   --graphql-context-path         Import path to GraphQL context type

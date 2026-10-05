@@ -10,6 +10,7 @@ export type Field = {
   required: boolean;
   isId: boolean;
   isRelation: boolean;
+  isEnum?: boolean;
   isArray: boolean;
 };
 
@@ -106,6 +107,8 @@ export type TypesGeneratorOptions = {
    * Defaults to `../{kebab-case}/{kebab-case}.types.auto`.
    */
   relationImportPath?: (relatedModelName: string) => string;
+  /** Import path for Prisma enum types. Defaults to @prisma/client. */
+  enumImportPath?: string;
 };
 
 export type LocalizationConfig = {

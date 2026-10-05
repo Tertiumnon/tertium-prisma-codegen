@@ -1,4 +1,4 @@
-// ── DMMF input types (compatible with PrismaClient._runtimeDataModel) ────────
+// ── Full schema DMMF input types (Prisma 7: @prisma/internals.getDMMF) ───────
 
 export type FilterMode = 'contains' | 'equals';
 

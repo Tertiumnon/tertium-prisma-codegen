@@ -2,7 +2,7 @@
 
 > ⚠️ **In development.** This package is pre-1.0 and not a final/stable API — breaking changes may land in minor/patch releases without notice. Pin an exact version and review changes before upgrading.
 
-Universal code generation library for Prisma schemas. Reads your Prisma schema at runtime and generates:
+Universal code generation library for Prisma schemas. Reads schema metadata during generation and produces:
 - **REST API handlers** with CRUD operations
 - **GraphQL resolvers** with filtering, search, pagination
 - **TypeScript types** for all entities
@@ -20,9 +20,7 @@ Single source of truth: your Prisma schema. Everything else is auto-generated.
 
 ## What is DMMF?
 
-DMMF (Data Model Meta Format) is Prisma's internal runtime representation of your schema. It is available at runtime without a database connection via `PrismaClient._runtimeDataModel` and contains every model, field, relation, and enum from your `schema.prisma`.
-
-This library reads DMMF instead of parsing `.prisma` files directly — which means it works with the already-compiled Prisma client and never touches the schema file at runtime.
+DMMF (Data Model Meta Format) describes the models, fields, relations, and enums in a Prisma schema. For Prisma 7, read the full schema DMMF with `@prisma/internals.getDMMF` during code generation. Prisma Client's private `_runtimeDataModel` does not contain all the field metadata required by these generators. Older projects can still use the runtime model path in the backend CLI.
 
 ## How it works
 
@@ -52,6 +50,12 @@ Prisma schema
 npm install @tertium/prisma-codegen
 ```
 
+For Prisma 7 backend generation, install `@prisma/internals` as a development dependency at the same version as `prisma`:
+
+```bash
+bun add -d @prisma/internals@7.10.0
+```
+
 ## Scripts
 
 This package includes two CLI-driven code generation scripts. All configuration is passed via command-line arguments — no script editing needed.
@@ -73,6 +77,7 @@ bun scripts/generate-server/generate-server.ts [options]
 **Example:**
 ```bash
 bun node_modules/@tertium/prisma-codegen/scripts/generate-server/generate-server.ts \
+  --schema prisma/schema.prisma \
   --entities-dir src/entities \
   --searchable-patterns name,title,description
 ```
@@ -111,27 +116,22 @@ bun node_modules/@tertium/prisma-codegen/scripts/generate-client/generate-client
 bun node_modules/@tertium/prisma-codegen/scripts/generate-server/generate-server.ts
 ```
 
-Uses default config. All paths adjustable via CLI arguments.
+For Prisma 7, pass `--schema prisma/schema.prisma`. The no-argument form uses the older runtime model path. All paths are adjustable via CLI arguments.
 
 ### 2. Expose `/entities` endpoint
 
 Add this to your backend to serve entity metadata:
 
 ```ts
-import { PrismaClient } from './generated/prisma/client';
+import { writeFileSync } from 'node:fs';
+import { readSchemaDMMF } from '@tertium/prisma-codegen/dmmf/schema';
 import { dmmfToEntityMeta } from '@tertium/prisma-codegen/dmmf/utils';
 
-const pc = new PrismaClient();
-const runtime = (pc as any)._runtimeDataModel;
+const dmmf = await readSchemaDMMF('prisma/schema.prisma');
+const { entities, enums } = dmmfToEntityMeta(dmmf.datamodel.models, dmmf.datamodel.enums);
+writeFileSync('src/core/entity/entity.meta.auto.json', JSON.stringify({ entities, enums }, null, 2));
 
-const dmmfModels = Object.entries(runtime.models).map(([name, m]: any) =>
-  ({ name, dbName: m.dbName, fields: m.fields }));
-const dmmfEnums = Object.entries(runtime.enums).map(([name, e]: any) =>
-  ({ name, values: e.values }));
-
-const { entities, enums } = dmmfToEntityMeta(dmmfModels, dmmfEnums);
-
-// Return from GET /entities endpoint
+// Serve the generated JSON from GET /entities; no Prisma internals in production.
 ```
 
 ### 3. Frontend: Generate client code
@@ -259,6 +259,7 @@ The library uses **direct imports only** — no central barrel files.
 
 - `@tertium/prisma-codegen/dmmf/types` → types
 - `@tertium/prisma-codegen/dmmf/utils` → utilities  
+- `@tertium/prisma-codegen/dmmf/schema` → build-time full DMMF loader (requires `@prisma/internals`)
 - `@tertium/prisma-codegen/server` → backend generators
 - `@tertium/prisma-codegen/client` → frontend generators
 

@@ -14,6 +14,9 @@ All options have sensible defaults based on typical project structures.
 
 ### Prisma Configuration
 
+- `--schema` - Path to `schema.prisma` for full DMMF generation (required for Prisma 7)
+  - Install `@prisma/internals` in the consuming project at the same version as `prisma`
+  - When omitted, the script uses the older Prisma Client runtime model
 - `--prisma-client-import` - Import path to PrismaClient
   - Default: `./generated/prisma/client`
   - Example: `@prisma/client` for apps that import from npm
@@ -61,7 +64,7 @@ All options have sensible defaults based on typical project structures.
 ### Standard project structure
 
 ```bash
-bun scripts/generate-server/generate-server.ts
+bun scripts/generate-server/generate-server.ts --schema prisma/schema.prisma
 ```
 
 ### Custom directories
