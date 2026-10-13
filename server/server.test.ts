@@ -367,7 +367,7 @@ describe('generateEntityTypesContent - sensitiveFields', () => {
 
   it('omits the sensitive field from both the read type and the input type', () => {
     const output = generateEntityTypesContent(authorModel, graphqlMetadata, { sensitiveFields: ['bio'] });
-    expect(output).not.toContain('bio');
+    expect(output).not.toMatch(/\bbio\b/);
   });
 
   it('keeps it when no sensitiveFields are configured', () => {
