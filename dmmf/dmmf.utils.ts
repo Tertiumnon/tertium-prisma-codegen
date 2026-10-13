@@ -135,7 +135,8 @@ export function detectTranslationRelations(
       (f) => f.kind === 'object' && f.type === model.name && f.relationFromFields?.length,
     );
     if (!backRelation) continue;
-    const fkFieldName = backRelation.relationFromFields![0];
+    const fkFieldName = backRelation.relationFromFields?.[0];
+    if (!fkFieldName) continue;
 
     // The parent must expose the reverse list relation - this is what the generator `include`s.
     const relationField = model.fields.find(
