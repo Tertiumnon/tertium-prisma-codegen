@@ -28,9 +28,9 @@
     "lint": "biome lint scripts dmmf server client",
     "lint:fix": "biome lint --write scripts dmmf server client",
     "typecheck": "tsc --noEmit",
-    "release:patch": "bun node_modules/@tertium/js/scripts/release/release.ts patch",
-    "release:minor": "bun node_modules/@tertium/js/scripts/release/release.ts minor",
-    "release:major": "bun node_modules/@tertium/js/scripts/release/release.ts major",
+    "release:patch": "npx @tertium/gith release --patch",
+    "release:minor": "npx @tertium/gith release --minor",
+    "release:major": "npx @tertium/gith release --major",
     "workflow:publish": "bun node_modules/@tertium/js/scripts/npm-publish-workflow/npm-publish-workflow.ts",
     "prepare": "git config core.hooksPath .githooks"
   },
