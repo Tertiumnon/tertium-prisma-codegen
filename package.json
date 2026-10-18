@@ -36,7 +36,7 @@
     "changelog": "npx @tertium/gith changelog"
   },
   "author": "Vitalii Balabanov",
-  "license": "ISC",
+  "license": "MIT",
   "publishConfig": {
     "access": "public"
   },
