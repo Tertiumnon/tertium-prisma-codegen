@@ -32,7 +32,8 @@
     "release:minor": "npx @tertium/gith release --minor",
     "release:major": "npx @tertium/gith release --major",
     "workflow:publish": "bun node_modules/@tertium/js/scripts/npm-publish-workflow/npm-publish-workflow.ts",
-    "prepare": "git config core.hooksPath .githooks"
+    "prepare": "git config core.hooksPath .githooks",
+    "changelog": "npx @tertium/gith changelog"
   },
   "author": "Vitalii Balabanov",
   "license": "ISC",
