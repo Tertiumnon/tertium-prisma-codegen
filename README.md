@@ -44,18 +44,6 @@ Prisma schema
                         └── writes: src/entities/*.client.auto.ts
 ```
 
-## Installation
-
-```bash
-npm install @tertium/prisma-codegen
-```
-
-For Prisma 7 backend generation, install `@prisma/internals` as a development dependency at the same version as `prisma`:
-
-```bash
-bun add -d @prisma/internals@7.10.0
-```
-
 ## Scripts
 
 This package includes two CLI-driven code generation scripts. All configuration is passed via command-line arguments — no script editing needed.
@@ -223,36 +211,6 @@ Both halves are required. A model carrying an `owner` rule with no `ownership` c
 throws at generation time rather than emitting an unguarded handler for data that asked
 to be guarded. Models without a rule generate byte-identical output to before.
 
-## Library structure
-
-The library uses **direct imports only** — no central barrel files.
-
-```
-@tertium/prisma-codegen/
-├── dmmf/
-│   ├── dmmf.types.ts          # DMMF + EntityMeta types
-│   └── dmmf.utils.ts          # Utilities + dmmfToEntityMeta()
-├── server/
-│   ├── server.types.ts        # Config types
-│   ├── server.ts              # Generators
-│   └── server.test.ts         # Tests (36 tests)
-├── client/
-│   ├── client.types.ts        # Config types
-│   ├── client.ts              # Generators
-│   └── client.test.ts         # Tests (12 tests)
-└── scripts/
-    ├── generate-server/
-    │   ├── generate-server.ts           # Main script
-    │   ├── generate-server.types.ts     # Config interface
-    │   ├── generate-server.constants.ts # Defaults
-    │   └── generate-server.md           # Documentation
-    └── generate-client/
-        ├── generate-client.ts           # Main script
-        ├── generate-client.types.ts     # Config interface
-        ├── generate-client.constants.ts # Defaults
-        └── generate-client.md           # Documentation
-```
-
 ## Import Rule
 
 **Always use explicit subpath imports.** No default export.
@@ -375,30 +333,10 @@ import type { ClientTypesConfig, ClientSchemaConfig, GraphQLClientConfig,
 | `TypesBarrelConfig` | Config for `generateTypesBarrelContent()` |
 | `SchemasBarrelConfig` | Config for `generateSchemasBarrelContent()` |
 
-## Testing
+## Documentation
 
-Run all 48 tests:
-
-```bash
-bun test
-```
-
-- **server.test.ts** — 36 tests for backend generators
-- **client.test.ts** — 12 tests for frontend generators
-
-All tests use generic fixtures (no project-specific names).
-
-## Release
-
-Release scripts use semantic versioning:
-
-```bash
-npm run release:patch   # 0.1.0 → 0.1.1
-npm run release:minor   # 0.1.0 → 0.2.0
-npm run release:major   # 0.1.0 → 1.0.0
-```
-
-Each bumps version and publishes to npm.
+- [Install](docs/INSTALL.md)
+- [Development](docs/DEVELOPMENT.md)
 
 ## License
 
