@@ -333,15 +333,6 @@ import type { ClientTypesConfig, ClientSchemaConfig, GraphQLClientConfig,
 | `TypesBarrelConfig` | Config for `generateTypesBarrelContent()` |
 | `SchemasBarrelConfig` | Config for `generateSchemasBarrelContent()` |
 
-## Documentation
-
-- [Install](docs/INSTALL.md)
-- [Development](docs/DEVELOPMENT.md)
-
-## License
-
-ISC
-
 ## Support
 
 If this project is useful to you, you can support its development on [Ko-fi](https://ko-fi.com/tertiumnon).
