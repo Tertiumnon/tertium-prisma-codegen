@@ -1,3 +1,20 @@
 type: code-generator
-publish_on:
+slug: tertium-prisma-codegen
+listed_on:
   - https://tertiumnon.github.io
+display_name:
+  en: "@tertium/prisma-codegen"
+summary:
+  en: "Code generation library for Prisma schemas: REST handlers, GraphQL resolvers, and TypeScript types."
+languages:
+  - en
+default_language: en
+status: alpha
+distribution:
+  - npm
+team:
+  - name: Vitalii Balabanov
+    roles:
+      - owner
+      - developer
+    github: Tertiumnon
